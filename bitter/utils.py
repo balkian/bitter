@@ -88,36 +88,37 @@ def extract(wq, recursive=False, user=None, initfile=None, dburi=None, extractor
 
     session = make_session(dburi)
 
-    if initfile:
-        screen_names = []
-        user_ids = []
-        if not user:
-            logger.info("No user. I will open %s" % initfile)
-            with open(initfile, 'r') as f:
-                for line in f:
-                    user = line.strip().split(',')[0]
-                    try:
-                        int(user)
-                        user_ids.append(user)
-                    except ValueError:
-                        screen_names.append(user.split('@')[-1])
-        else:
-            try:
-                user_ids.append(int(user))
-                logger.info("Added id")
-            except Exception as ex:
-                logger.info("Exception: {}".format(ex))
-                logger.info("Added screen_name")
-                screen_names.append(user)
-        nusers = list(get_users(wq, screen_names, by_name=True))
-        if user_ids:
-            nusers += list(get_users(wq, user_ids, by_name=False))
+    screen_names = []
+    user_ids = []
 
-        for i in nusers:
-            add_user(session, i, enqueue=True)
+    def classify_user(id_or_name):
+        try:
+            int(user)
+            user_ids.append(user)
+            logger.info("Added user id")
+        except ValueError:
+            logger.info("Added screen_name")
+            screen_names.append(user.split('@')[-1])
+        
+    if user:
+        classify_user(user)
+
+    elif initfile:
+        logger.info("No user. I will open %s" % initfile)
+        with open(initfile, 'r') as f:
+            for line in f:
+                user = line.strip().split(',')[0]
+                classify_user(user)
     else:
         logger.info('Using pending users from last session')
 
+
+    nusers = list(get_users(wq, screen_names, by_name=True))
+    if user_ids:
+        nusers += list(get_users(wq, user_ids, by_name=False))
+
+    for i in nusers:
+        add_user(session, i, enqueue=True)
 
     total_users = session.query(sqlalchemy.func.count(User.id)).scalar()
     logging.info('Total users: {}'.format(total_users))
@@ -200,6 +201,12 @@ def get_tweet(c, tid):
 
 def search_tweet(c, query):
     return c.search.tweets(q=query)
+
+def user_timeline(c, query):
+    try:
+        return c.statuses.user_timeline(user_id=int(query))
+    except ValueError:
+        return c.statuses.user_timeline(screen_name=query)
 
 def get_user(c, user):
     try:

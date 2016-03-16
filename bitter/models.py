@@ -1,4 +1,5 @@
 import time
+import json
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.types import BigInteger, Integer, Text, Boolean
@@ -54,6 +55,18 @@ class User(Base):
     utc_offset = Column(Integer)
     verified = Column(Boolean)
 
+
+    def as_dict(self):
+        dcopy = self.__dict__.copy()
+        for k,v in self.__dict__.items():
+            if k[0] == '_':
+                del dcopy[k]
+        try:
+            dcopy['entities'] = json.loads(dcopy['entities'])
+        except Exception:
+            print('Could not convert to dict')
+            pass
+        return dcopy
 
 class Following(Base):
     __tablename__ = 'followers'

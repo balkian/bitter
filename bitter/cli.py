@@ -1,5 +1,6 @@
 import click
 import json
+import os
 import logging
 import time
 import sqlalchemy.types
@@ -26,8 +27,14 @@ def main(ctx, verbose, logging_level, config, credentials):
     ctx.obj = {}
     ctx.obj['VERBOSE'] = verbose
     ctx.obj['CONFIG'] = config
-    ctx.obj['CREDENTIALS'] = credentials
-
+    if os.path.isfile(credentials):
+        ctx.obj['CREDENTIALS'] = credentials
+    else:
+        global_file = os.path.expanduser('~/.bitter-credentials.json')
+        if os.path.isfile(global_file):
+            ctx.obj['CREDENTIALS'] = global_file
+        else:
+            raise Exception('You need to provide a valid credentials file')
 
 @main.group()
 @click.pass_context 
@@ -51,6 +58,15 @@ def get_tweet(ctx, query):
     wq = crawlers.TwitterQueue.from_credentials(ctx.obj['CREDENTIALS'])
     c = wq.next()
     t = utils.search_tweet(c.client, query)
+    print(json.dumps(t, indent=2))
+
+@tweet.command('timeline')
+@click.argument('user')
+@click.pass_context 
+def get_tweet(ctx, user):
+    wq = crawlers.TwitterQueue.from_credentials(ctx.obj['CREDENTIALS'])
+    c = wq.next()
+    t = utils.user_timeline(c.client, user)
     print(json.dumps(t, indent=2))
 
 @main.group()
@@ -147,7 +163,6 @@ def get_users(ctx, usersfile, skip, until, threads, db):
         session = make_session(dburl)
         q_iter = iter(ids_queue.get, None)
         for user in utils.get_users(wq, q_iter):
-            user['entities'] = json.dumps(user['entities'])
             dbuser = User(**user)
             session.add(dbuser)
             local_collected += 1
@@ -228,6 +243,36 @@ def status_extractor(ctx, with_followers, with_not_pending):
             for j in i.__dict__:
                 print('\t{}: {}'.format(j, getattr(i,j)))
 
+@extractor.command('network')
+@click.option('--as_json', is_flag=True, default=False)
+@click.pass_context
+def network_extractor(ctx, as_json):
+    session = ctx.obj['SESSION']
+    followers = session.query(Following)
+    follower_map = []
+    for i in followers:
+        if not as_json:
+            print('{} -> {}'.format(i.follower, i.isfollowed))
+        else:
+            follower_map.append({'source_id': i.follower,
+                                 'target_id': i.isfollowed,
+                                 'following': True})
+    if as_json:
+        import json
+        print(json.dumps(follower_map, indent=4))
+    
+
+@extractor.command('users')
+@click.pass_context
+def users_extractor(ctx):
+    session = ctx.obj['SESSION']
+    users = session.query(User)
+    import json
+    for i in users:
+        # print(json.dumps(i.as_dict(), indent=4))
+        dd = i.as_dict()
+        print(json.dumps(dd, indent=4))
+
 
 @extractor.command()
 @click.option('--recursive', is_flag=True, help='Get following/follower/info recursively.', default=False)
@@ -253,8 +298,6 @@ def reset_extractor(ctx):
     db = ctx.obj['DBURI']
     session = make_session(db)
     session.query(ExtractorEntry).filter(ExtractorEntry.pending==True).update({'pending':False})
-
-
 
 @api.command('limits')
 @click.argument('url', required=False)
