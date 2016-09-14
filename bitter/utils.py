@@ -5,11 +5,16 @@ import json
 import signal
 import sys
 import sqlalchemy
+import os
 
 from itertools import islice
+from contextlib import contextmanager
+
 from twitter import TwitterHTTPError
 
 from bitter.models import Following, User, ExtractorEntry, make_session
+
+from bitter import config
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +24,58 @@ def signal_handler(signal, frame):
     sys.exit(0)
 
 
+def get_credentials_path(credfile=None):
+    if not credfile:
+        if config.CREDENTIALS:
+            credfile = config.CREDENTIALS
+        else:
+            raise Exception('No valid credentials file')
+    return os.path.expanduser(credfile)
+
+@contextmanager
+def credentials_file(credfile, *args, **kwargs):
+    p = get_credentials_path(credfile)
+    with open(p, *args, **kwargs) as f:
+        yield f
+
+def iter_credentials(credfile=None):
+    with credentials_file(credfile) as f:
+        for l in f:
+            yield json.loads(l.strip())
+
+def get_credentials(credfile=None, inverse=False, **kwargs):
+    creds = []
+    for i in iter_credentials(credfile):
+        if all(map(lambda x: i[x[0]] == x[1], kwargs.items())):
+            creds.append(i)
+    return creds
+
+def create_credentials(credfile=None):
+    credfile = get_credentials_path(credfile)
+    with credentials_file(credfile, 'a'):
+        pass
+
+def delete_credentials(credfile=None, **creds):
+    tokeep = get_credentials(credfile, inverse=True, **creds)
+    with credentials_file(credfile, 'w') as f:
+        for i in tokeep:
+            f.write(json.dumps(i))
+            f.write('\n')
+
+def add_credentials(credfile=None, **creds):
+    exist = get_credentials(credfile, **creds)
+    if not exist:
+        with credentials_file(credfile, 'a') as f:
+            f.write(json.dumps(creds))
+            f.write('\n')
+
+
 def get_users(wq, ulist, by_name=False, queue=None, max_users=100):
     t = 'name' if by_name else 'uid'
     logger.debug('Getting users by {}: {}'.format(t, ulist))
     ilist = iter(ulist)
     while True:
-        userslice = ",".join(islice(ilist, max_users))
+        userslice = ",".join(str(i) for i in islice(ilist, max_users))
         if not userslice:
             break
         try:
@@ -48,7 +99,7 @@ def get_users(wq, ulist, by_name=False, queue=None, max_users=100):
 
 def trim_user(user):
     if 'status' in user:
-        del user['status'] 
+        del user['status']
     if 'follow_request_sent' in user:
         del user['follow_request_sent']
     if 'created_at' in user:
@@ -64,7 +115,7 @@ def add_user(session, user, enqueue=False):
     olduser = session.query(User).filter(User.id==user['id'])
     if olduser:
         olduser.delete()
-    user = User(**user) 
+    user = User(**user)
     session.add(user)
     if extract:
         logging.debug('Adding entry')
@@ -76,12 +127,12 @@ def add_user(session, user, enqueue=False):
         entry.pending = True
         entry.cursor = -1
         session.commit()
-    
+
 
 # TODO: adapt to the crawler
 def extract(wq, recursive=False, user=None, initfile=None, dburi=None, extractor_name=None):
     signal.signal(signal.SIGINT, signal_handler)
-    
+
     w = wq.next()
     if not dburi:
         dburi = 'sqlite:///%s.db' % extractor_name
@@ -99,7 +150,7 @@ def extract(wq, recursive=False, user=None, initfile=None, dburi=None, extractor
         except ValueError:
             logger.info("Added screen_name")
             screen_names.append(user.split('@')[-1])
-        
+
     if user:
         classify_user(user)
 
@@ -123,7 +174,7 @@ def extract(wq, recursive=False, user=None, initfile=None, dburi=None, extractor
     total_users = session.query(sqlalchemy.func.count(User.id)).scalar()
     logging.info('Total users: {}'.format(total_users))
     def pending_entries():
-        pending = session.query(ExtractorEntry).filter(ExtractorEntry.pending == True).count() 
+        pending = session.query(ExtractorEntry).filter(ExtractorEntry.pending == True).count()
         logging.info('Pending: {}'.format(pending))
         return pending
 
@@ -192,7 +243,7 @@ def extract(wq, recursive=False, user=None, initfile=None, dburi=None, extractor
 
         session.add(candidate)
         session.commit()
-        
+
         sys.stdout.flush()
 
 

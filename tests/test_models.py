@@ -1,4 +1,4 @@
-from unittests import TestCase
+from unittest import TestCase
 
 class TestModels(TestCase):
 

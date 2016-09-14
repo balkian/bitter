@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+{% if limits | length  %}
+<ul id="double">
+  {% for limit in limits %}
+  <li class="limits"> <span>{{ limit }} </span><span><pre class="jsonlimits">{{ limits[limit] }}</pre></span></li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% endblock %}

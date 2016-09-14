@@ -27,7 +27,7 @@ setup(
     author='J. Fernando Sanchez',
     author_email='balkian@gmail.com',
     url="http://balkian.com",
-    version="0.3",
+    version="0.4",
     install_requires=install_reqs,
     tests_require=test_reqs,
     include_package_data=True,

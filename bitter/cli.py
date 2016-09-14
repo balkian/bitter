@@ -20,21 +20,15 @@ logger = logging.getLogger(__name__)
 @click.option("--verbose", is_flag=True)
 @click.option("--logging_level", required=False, default='WARN')
 @click.option("--config", required=False)
-@click.option('-c', '--credentials',show_default=True, default='credentials.json')
+@click.option('-c', '--credentials', show_default=True, default='~/.bitter-credentials.json')
 @click.pass_context
 def main(ctx, verbose, logging_level, config, credentials):
     logging.basicConfig(level=getattr(logging, logging_level))
     ctx.obj = {}
     ctx.obj['VERBOSE'] = verbose
     ctx.obj['CONFIG'] = config
-    if os.path.isfile(credentials):
-        ctx.obj['CREDENTIALS'] = credentials
-    else:
-        global_file = os.path.expanduser('~/.bitter-credentials.json')
-        if os.path.isfile(global_file):
-            ctx.obj['CREDENTIALS'] = global_file
-        else:
-            raise Exception('You need to provide a valid credentials file')
+    ctx.obj['CREDENTIALS'] = credentials
+    utils.create_credentials(credentials)
 
 @main.group()
 @click.pass_context 
@@ -46,8 +40,7 @@ def tweet(ctx):
 @click.pass_context 
 def get_tweet(ctx, tweetid):
     wq = crawlers.TwitterQueue.from_credentials(ctx.obj['CREDENTIALS'])
-    c = wq.next()
-    t = crawlers.get_tweet(c.client, tweetid)
+    t = utils.get_tweet(wq, tweetid)
     print(json.dumps(t, indent=2))
         
 
@@ -319,6 +312,18 @@ def get_limits(ctx, url):
             print('{}: {}'.format(url, limit))           
         else:
             print(json.dumps(resp, indent=2))
+
+@main.command('server')
+@click.argument('CONSUMER_KEY', required=True)
+@click.argument('CONSUMER_SECRET', required=True)
+@click.pass_context
+def run_server(ctx, consumer_key, consumer_secret):
+    from . import config
+    config.CONSUMER_KEY = consumer_key
+    config.CONSUMER_SECRET = consumer_secret
+    from .webserver import app
+    app.run()
+    
 
 if __name__ == '__main__':
     main()

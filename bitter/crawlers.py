@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 
 from twitter import *
 from collections import OrderedDict
+from . import utils
+from . import config
 
 
 class AttrToFunc(object):
@@ -102,17 +104,15 @@ class TwitterQueue(AttrToFunc):
         return self.next().client
 
     @classmethod
-    def from_credentials(self, cred_file):
+    def from_credentials(self, cred_file=None):
         wq = TwitterQueue()
 
-        with open(cred_file) as f:
-            for line in f:
-                cred = json.loads(line)
-                c = Twitter(auth=OAuth(cred['token_key'],
-                                       cred['token_secret'],
-                                       cred['consumer_key'],
-                                       cred['consumer_secret']))
-                wq.ready(TwitterWorker(cred["user"], c))
+        for cred in utils.get_credentials(cred_file):
+            c = Twitter(auth=OAuth(cred['token_key'],
+                                   cred['token_secret'],
+                                   cred['consumer_key'],
+                                   cred['consumer_secret']))
+            wq.ready(TwitterWorker(cred["user"], c))
         return wq
 
     def _next(self):

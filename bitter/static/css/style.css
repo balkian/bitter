@@ -1,0 +1,50 @@
+@charset 'UTF-8';
+
+html {
+    display: block;
+    margin: auto;
+    width: 100%;
+    background-color: black;
+    color: white;
+    font-size: 1.5em;
+}
+.wrapper {
+    margin: 0 auto;
+    width: 80%;
+    text-align: center;
+}
+
+.me {
+    width: 15em;
+	border-radius: 150px;
+	-webkit-border-radius: 150px;
+	-moz-border-radius: 150px;
+
+}
+
+.button {
+    background-color: black;
+    color: white;
+    padding: 0.5em;
+    font-size: 1.5em;
+    border: 3px solid white;
+    margin-top: 1em;
+    display: inline-block;
+    border-radius: 1em;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+.button:hover {
+    color: black;
+    background-color: white;
+}
+
+.limits {
+    text-align: left;
+}
+
+.jsonlimits {
+    overflow: auto;
+    max-height: 5em;
+}
