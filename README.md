@@ -41,6 +41,14 @@ To add more users to the credentials file, you may run the builtin server, with 
 python -m bitter server <consumer_key> <consumer_secret>
 ```
 
+If you get an error about missing dependencies, install the extra dependencies for the server. e.g.:
+
+```
+pip install bitter[web]
+```
+
+Make sure the callback url of your app is set to http://127.0.0.1:5000/callback_url/
+
 # Notice
 Please, use according to Twitter's Terms of Service
 

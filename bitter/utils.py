@@ -46,7 +46,10 @@ def iter_credentials(credfile=None):
 def get_credentials(credfile=None, inverse=False, **kwargs):
     creds = []
     for i in iter_credentials(credfile):
-        if all(map(lambda x: i[x[0]] == x[1], kwargs.items())):
+        matches = all(map(lambda x: i[x[0]] == x[1], kwargs.items()))
+        if matches and not inverse:
+            creds.append(i)
+        elif inverse and not matches:
             creds.append(i)
     return creds
 

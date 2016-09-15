@@ -12,7 +12,14 @@ from sqlalchemy import exists
 
 from bitter import utils, models, crawlers
 from bitter.models import make_session, User, ExtractorEntry, Following
-from contextlib import ExitStack
+
+import sys
+if sys.version_info <= (3, 0):
+    from contextlib2 import ExitStack
+else:
+    from contextlib import ExitStack
+    
+
 
 logger = logging.getLogger(__name__)
 

@@ -6,16 +6,25 @@ from pip.req import parse_requirements
 # pip 6 introduces the *required* session argument
 try:
     install_reqs = parse_requirements("requirements.txt", session=pip.download.PipSession())
+    py2_reqs = parse_requirements("requirements-py2.txt", session=pip.download.PipSession())
     test_reqs = parse_requirements("test-requirements.txt", session=pip.download.PipSession())
 except AttributeError:
     install_reqs = parse_requirements("requirements.txt")
+    py2_reqs = parse_requirements("requirements-py2.txt")
     test_reqs = parse_requirements("test-requirements.txt")
+
+import sys
+import itertools
+if sys.version_info <= (3, 0):
+    install_reqs = itertools.chain(install_reqs, py2_reqs)
 
 # reqs is a list of requirement
 # e.g. ['django==1.5.1', 'mezzanine==1.4.6']
 install_reqs = [str(ir.req) for ir in install_reqs]
 test_reqs = [str(ir.req) for ir in test_reqs]
 
+with open('bitter/__init__.py') as f:
+    exec(f.read())
 
 setup(
     name="bitter",
@@ -27,9 +36,13 @@ setup(
     author='J. Fernando Sanchez',
     author_email='balkian@gmail.com',
     url="http://balkian.com",
-    version="0.4",
+    version=__version__,
     install_requires=install_reqs,
     tests_require=test_reqs,
+    extras_require = {
+        'server': ['flask', 'flask-oauthlib']
+        },
+    test_suite="tests",
     include_package_data=True,
     entry_points="""
         [console_scripts]
