@@ -6,9 +6,12 @@ import signal
 import sys
 import sqlalchemy
 import os
+import multiprocessing
+from multiprocessing.pool import ThreadPool
 
 from itertools import islice
 from contextlib import contextmanager
+from itertools import zip_longest
 
 from twitter import TwitterHTTPError
 
@@ -23,6 +26,16 @@ def signal_handler(signal, frame):
     logger.info('You pressed Ctrl+C!')
     sys.exit(0)
 
+def chunk(iterable, n, fillvalue=None):
+    args = [iter(iterable)] * n
+    return zip_longest(*args, fillvalue=fillvalue)
+
+def parallel(func, source, chunksize=0, numcpus=multiprocessing.cpu_count()):
+    if chunksize:
+        source = chunk(source, chunksize)
+    p = ThreadPool(numcpus)
+    for i in p.imap(func, source):
+        yield i
 
 def get_credentials_path(credfile=None):
     if not credfile:

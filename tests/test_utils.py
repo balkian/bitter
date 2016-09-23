@@ -1,6 +1,7 @@
 from unittest import TestCase
 
 import os
+import types
 
 from bitter import utils
 from bitter import config as c
@@ -45,6 +46,16 @@ class TestUtils(TestCase):
         utils.delete_credentials(user="test")
         print(utils.get_credentials())
         assert not utils.get_credentials(user="test")
-        
-        
+
+    def test_parallel(self):
+        import time
+        def echo(i):
+            time.sleep(2)
+            return i
+        tic = time.time()
+        resp = utils.parallel(echo, [1,2,3])
+        assert isinstance(resp, types.GeneratorType)
+        assert list(resp) == [1,2,3]
+        toc = time.time()
+        assert (tic-toc) < 6000
         

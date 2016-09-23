@@ -7,7 +7,6 @@ import sqlalchemy.types
 import threading
 import sqlite3
 
-from six.moves import map, filter, queue
 from sqlalchemy import exists
 
 from bitter import utils, models, crawlers
