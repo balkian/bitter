@@ -1,6 +1,7 @@
 include requirements.txt
 include test-requirements.txt
 include README.md
+include bitter/VERSION
 graft bitter/templates
 graft bitter/static
 graft test

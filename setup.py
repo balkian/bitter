@@ -23,16 +23,12 @@ if sys.version_info <= (3, 0):
 install_reqs = [str(ir.req) for ir in install_reqs]
 test_reqs = [str(ir.req) for ir in test_reqs]
 
-with open('bitter/__init__.py') as f:
-    exec(f.read())
+from bitter import __version__
 
 setup(
     name="bitter",
     packages=['bitter'],
-    description='''
-    Simplifying how researchers access Data.
-    It includes a CLI and a library.
-    ''',
+    description=" Simplifying how researchers access Data. It includes a CLI and a library.",
     author='J. Fernando Sanchez',
     author_email='balkian@gmail.com',
     url="http://balkian.com",

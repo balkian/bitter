@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 from twitter import *
 from collections import OrderedDict
+from threading import Lock
 from . import utils
 from . import config
 
@@ -41,6 +42,7 @@ class TwitterWorker(object):
         self.name = name
         self.client = client
         self.throttled_time = False
+        self._lock = Lock()
         self.busy = False
 
     @property
@@ -76,6 +78,7 @@ class TwitterQueue(AttrToFunc):
             c = None
             try:
                 c = self.next()
+                c._lock.acquire()
                 c.busy = True
                 logger.debug('Next: {}'.format(c.name))
                 ping = time.time()
@@ -97,6 +100,7 @@ class TwitterQueue(AttrToFunc):
             finally:
                 if c:
                     c.busy = False
+                    c._lock.release()
                     
 
     @property
