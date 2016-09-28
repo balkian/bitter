@@ -6,7 +6,7 @@ import datetime
 import time
 
 from bitter import utils
-from bitter.crawlers import TwitterQueue, TwitterWorker
+from bitter.crawlers import TwitterQueue, TwitterWorker, TwitterQueueException
 from bitter import config as c
 
 class TestUtils(TestCase):
@@ -39,6 +39,8 @@ class TestUtils(TestCase):
     def test_is_limited(self):
         w1 = list(self.wq.queue)[0]
         assert not w1.is_limited(['statuses', 'lookup'])
+        w1.set_limit(['test', 'limited'], {'remaining': 0, 'reset': time.time()+100})
+        assert  w1.is_limited(['test', 'limited'])
 
     def test_call(self):
         w1 = list(self.wq.queue)[0]
@@ -46,3 +48,28 @@ class TestUtils(TestCase):
         resp = self.wq.users.lookup(screen_name='balkian')
         l2 = w1.get_limit(['users', 'lookup'])
         assert l1['remaining']-l2['remaining'] == 1
+
+    def test_consume(self):
+        w1 = list(self.wq.queue)[0]
+        l1 = w1.get_limit(['friends', 'list'])
+        self.wq.wait = False
+        for i in range(l1['remaining']):
+            print(i)
+            resp = self.wq.friends.list(screen_name='balkian')
+        # l2 = w1.get_limit(['users', 'lookup'])
+        # assert l2['remaining'] == 0
+        # self.wq.users.lookup(screen_name='balkian')
+        
+        failed = False
+        try:
+            # resp = self.wq.friends.list(screen_name='balkian')
+            self.wq.next(['friends', 'list'])
+        except TwitterQueueException:
+            failed = True
+        assert failed
+        l2 = w1.get_limit(['friends', 'list'])
+        assert self.wq.get_wait(['friends', 'list']) > (l2['reset']-time.time())
+        assert self.wq.get_wait(['friends', 'list']) < (l2['reset']-time.time()+2)
+        time.sleep(w1.get_wait(['friends', 'list']))
+
+        
