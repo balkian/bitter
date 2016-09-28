@@ -10,6 +10,7 @@ import sqlite3
 from sqlalchemy import exists
 
 from bitter import utils, models, crawlers
+from bitter import config as bconf
 from bitter.models import make_session, User, ExtractorEntry, Following
 
 import sys
@@ -33,7 +34,7 @@ def main(ctx, verbose, logging_level, config, credentials):
     ctx.obj = {}
     ctx.obj['VERBOSE'] = verbose
     ctx.obj['CONFIG'] = config
-    ctx.obj['CREDENTIALS'] = credentials
+    bconf.CREDENTIALS = credentials
     utils.create_credentials(credentials)
 
 @main.group()
@@ -45,7 +46,7 @@ def tweet(ctx):
 @click.argument('tweetid')
 @click.pass_context 
 def get_tweet(ctx, tweetid):
-    wq = crawlers.TwitterQueue.from_credentials(ctx.obj['CREDENTIALS'])
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
     t = utils.get_tweet(wq, tweetid)
     print(json.dumps(t, indent=2))
         
@@ -54,7 +55,7 @@ def get_tweet(ctx, tweetid):
 @click.argument('query')
 @click.pass_context 
 def get_tweet(ctx, query):
-    wq = crawlers.TwitterQueue.from_credentials(ctx.obj['CREDENTIALS'])
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
     c = wq.next()
     t = utils.search_tweet(c.client, query)
     print(json.dumps(t, indent=2))
@@ -63,7 +64,7 @@ def get_tweet(ctx, query):
 @click.argument('user')
 @click.pass_context 
 def get_tweet(ctx, user):
-    wq = crawlers.TwitterQueue.from_credentials(ctx.obj['CREDENTIALS'])
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
     c = wq.next()
     t = utils.user_timeline(c.client, user)
     print(json.dumps(t, indent=2))
@@ -88,7 +89,7 @@ def list_users(ctx, db):
 @click.argument('user')
 @click.pass_context 
 def get_user(ctx, user):
-    wq = crawlers.TwitterQueue.from_credentials(ctx.obj['CREDENTIALS'])
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
     c = wq.next()
     u = utils.get_user(c.client, user)
     print(json.dumps(u, indent=2))
@@ -112,7 +113,7 @@ def get_users(ctx, usersfile, skip, until, threads, db):
             return ExitStack()
 
 
-    wq = crawlers.TwitterQueue.from_credentials(ctx.obj['CREDENTIALS'])
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
     logger.info('Starting Network crawler with {} threads and {} credentials.'.format(threads,
                                                                                       len(wq.queue)))
 
@@ -281,7 +282,7 @@ def users_extractor(ctx):
 @click.pass_context
 def extract(ctx, recursive, user, name, initfile):
     print(locals())
-    wq = crawlers.TwitterQueue.from_credentials(ctx.obj['CREDENTIALS'])
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
     dburi = ctx.obj['DBURI']
     utils.extract(wq,
                   recursive=recursive,
@@ -293,7 +294,7 @@ def extract(ctx, recursive, user, name, initfile):
 @extractor.command('reset')
 @click.pass_context
 def reset_extractor(ctx):
-    wq = crawlers.TwitterQueue.from_credentials(ctx.obj['CREDENTIALS'])
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
     db = ctx.obj['DBURI']
     session = make_session(db)
     session.query(ExtractorEntry).filter(ExtractorEntry.pending==True).update({'pending':False})
@@ -302,7 +303,7 @@ def reset_extractor(ctx):
 @click.argument('url', required=False)
 @click.pass_context
 def get_limits(ctx, url):
-    wq = crawlers.TwitterQueue.from_credentials(ctx.obj['CREDENTIALS'])
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
     for worker in wq.queue:
         resp = worker.client.application.rate_limit_status()
         print('#'*20)
@@ -324,11 +325,10 @@ def get_limits(ctx, url):
 @click.argument('CONSUMER_SECRET', required=True)
 @click.pass_context
 def run_server(ctx, consumer_key, consumer_secret):
-    from . import config
-    config.CONSUMER_KEY = consumer_key
-    config.CONSUMER_SECRET = consumer_secret
+    bconf.CONSUMER_KEY = consumer_key
+    bconf.CONSUMER_SECRET = consumer_secret
     from .webserver import app
-    app.run()
+    app.run(host='0.0.0.0')
     
 
 if __name__ == '__main__':

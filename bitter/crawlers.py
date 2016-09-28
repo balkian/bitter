@@ -1,4 +1,5 @@
 import time 
+import datetime
 import urllib
 import random
 import json
@@ -41,23 +42,52 @@ class TwitterWorker(object):
     def __init__(self, name, client):
         self.name = name
         self.client = client
-        self.throttled_time = False
         self._lock = Lock()
         self.busy = False
+        self.limits = self.client.application.rate_limit_status()
 
-    @property
-    def throttled(self):
-        if not self.throttled_time:
-            return False
-        t = time.time()
-        delta = self.throttled_time - t
-        if delta > 0:
-            return True
+    def is_limited(self, uriparts):
+        limit = self.get_limit(uriparts)
+        if limit and limit['remaining'] <=0:
+            t = datime.datetime.now()
+            delta = limit['reset'] -  t
+            if delta < datetime.timedelta(seconds=1):
+                return True
         return False
 
-    def throttle_until(self, epoch=None):
-        self.throttled_time = int(epoch)
-        logger.info("Worker %s throttled for %s seconds" % (self.name, str(epoch-time.time())))
+    def get_wait(self, uriparts):
+        limits = self.get_limit(uriparts)
+        if limits['remaining'] > 0:
+            return 0
+        reset = datetime.datetime.fromtimestamp(limits.get('reset', 0))
+        now = datetime.datetime.now()
+        return max(0, (reset-now).total_seconds())
+
+    def get_limit(self, uriparts):
+        uri = '/'+'/'.join(uriparts)
+        return self.limits.get('resources', {}).get(uriparts[0], {}).get(uri, {})
+
+    def set_limit(self, uriparts, value):
+        uri = '/'+'/'.join(uriparts)
+        if 'resources' not in self.limits:
+            self.limits['resources'] = {}
+        resources = self.limits['resources']
+        if uriparts[0] not in resources:
+            resources[uriparts[0]] = {}
+        resource = resources[uriparts[0]]
+        resource[uri] = value
+
+    def update_limits(self, uriparts, remaining, reset, limit):
+        self.set_limit(uriparts, {'remaining': remaining,
+                                  'reset': reset,
+                                  'limit': limit})
+        
+    def update_limits_from_headers(self, uriparts, headers):
+        reset = float(headers.get('X-Rate-Limit-Reset', time.time() + 30))
+        remaining = int(headers.get('X-Rate-Limit-Remaining', 0))
+        limit = int(headers.get('X-Rate-Limit-Limit', -1))
+        self.update_limits(uriparts=uriparts, remaining=remaining, reset=reset, limit=limit)
+
 
 
 class TwitterQueue(AttrToFunc):
@@ -77,20 +107,20 @@ class TwitterQueue(AttrToFunc):
         while True:
             c = None
             try:
-                c = self.next()
+                c = self.next(uriparts)
                 c._lock.acquire()
                 c.busy = True
                 logger.debug('Next: {}'.format(c.name))
                 ping = time.time()
                 resp = getattr(c.client, "/".join(uriparts))(*args, **kwargs)
                 pong = time.time()
+                c.update_limits_from_headers(uriparts, resp.headers)
                 logger.debug('Took: {}'.format(pong-ping))
                 return resp
             except TwitterHTTPError as ex:
                 if ex.e.code in (429, 502, 503, 504):
-                    limit = ex.e.headers.get('X-Rate-Limit-Reset', time.time() + 30)
                     logger.info('{} limited'.format(c.name))
-                    c.throttle_until(limit)
+                    c.update_limits_from_headers(uriparts, ex.e.headers)
                     continue
                 else:
                     raise
@@ -101,11 +131,6 @@ class TwitterQueue(AttrToFunc):
                 if c:
                     c.busy = False
                     c._lock.release()
-                    
-
-    @property
-    def client(self):
-        return self.next().client
 
     @classmethod
     def from_credentials(self, cred_file=None):
@@ -119,26 +144,26 @@ class TwitterQueue(AttrToFunc):
             wq.ready(TwitterWorker(cred["user"], c))
         return wq
 
-    def _next(self):
+    def _next(self, uriparts):
         logger.debug('Getting next available')
         s = list(self.queue)
         random.shuffle(s)
         for worker in s:
-            if not worker.throttled and not worker.busy:
+            if not worker.is_limited(uriparts) and not worker.busy:
                 return worker
         raise Exception('No worker is available')
 
-    def next(self):
+    def next(self, uriparts):
         if not self.wait:
-            return self._next()
+            return self._next(uriparts)
         while True:
             try:
-                return self._next()
+                return self._next(uriparts)
             except Exception:
                 available = filter(lambda x: not x.busy, self.queue)
                 if available:
-                    first_worker = min(available, key=lambda x: x.throttled_time)
-                    diff = first_worker.throttled_time - time.time()
+                    first_worker = min(available, key=lambda x: x.get_wait(uriparts))
+                    diff = first_worker.get_wait(uriparts)
                     logger.info("All workers are throttled. Waiting %s seconds" % diff)
                 else:
                     diff = 5
