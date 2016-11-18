@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 from twitter import *
 from collections import OrderedDict
 from threading import Lock
+from itertools import islice
 from . import utils
 from . import config
 
@@ -37,13 +38,50 @@ class AttrToFunc(object):
         #     kwargs[i] = a
         return self.handler(self.__uriparts, *args, **kwargs)
 
+
+class FromCredentialsMixin(object):
+
+    @classmethod
+    def from_credentials(cls, cred_file=None, max_workers=None):
+        wq = cls()
+
+        for cred in islice(utils.get_credentials(cred_file), max_workers):
+            wq.ready(cls.worker_class(cred["user"], cred))
+        return wq
+    
+
 class TwitterWorker(object):
-    def __init__(self, name, client):
+    api_class = None
+
+    def __init__(self, name, creds):
         self.name = name
-        self.client = client
+        self._client = None
+        self.cred = creds
         self._lock = Lock()
         self.busy = False
-        self.limits = self.client.application.rate_limit_status()
+
+    @property
+    def client(self):
+        if not self._client:
+            auth=OAuth(self.cred['token_key'],
+                       self.cred['token_secret'],
+                       self.cred['consumer_key'],
+                       self.cred['consumer_secret'])
+            self._client = self.api_class(auth=auth)
+        return self._client
+
+class RestWorker(TwitterWorker):
+    api_class = Twitter
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._limits = None
+
+    @property
+    def limits(self):
+        if not self._limits:
+            self._limits = self.client.application.rate_limit_status()
+        return self._limits
 
     def is_limited(self, uriparts):
         return self.get_wait(uriparts)>0
@@ -83,10 +121,10 @@ class TwitterWorker(object):
 
 
 
-class TwitterQueueException(BaseException):
+class QueueException(BaseException):
     pass
 
-class TwitterQueue(AttrToFunc):
+class QueueMixin(AttrToFunc, FromCredentialsMixin):
     def __init__(self, wait=True):
         logger.debug('Creating worker queue')
         self.queue = set()
@@ -96,6 +134,10 @@ class TwitterQueue(AttrToFunc):
 
     def ready(self, worker):
         self.queue.add(worker)
+
+class TwitterQueue(QueueMixin):
+
+    worker_class = RestWorker
 
     def handle_call(self, uriparts, *args, **kwargs):
         logger.debug('Called: {}'.format(uriparts))
@@ -132,21 +174,8 @@ class TwitterQueue(AttrToFunc):
                 if not self.wait:
                     patience -= 1
 
-    @classmethod
-    def from_credentials(self, cred_file=None):
-        wq = TwitterQueue()
-
-        for cred in utils.get_credentials(cred_file):
-            c = Twitter(auth=OAuth(cred['token_key'],
-                                   cred['token_secret'],
-                                   cred['consumer_key'],
-                                   cred['consumer_secret']))
-            wq.ready(TwitterWorker(cred["user"], c))
-        return wq
-
-
     def get_wait(self, uriparts):
-        available = filter(lambda x: not x.busy, self.queue)
+        available = next(lambda x: not x.busy, self.queue)
         first_worker = min(available, key=lambda x: x.get_wait(uriparts))
         diff = first_worker.get_wait(uriparts)
         return diff
@@ -159,7 +188,7 @@ class TwitterQueue(AttrToFunc):
         for worker in s:
             if not worker.is_limited(uriparts) and not worker.busy:
                 return worker
-        raise TwitterQueueException('No worker is available')
+        raise QueueException('No worker is available')
 
     def next(self, uriparts):
         if not self.wait:
@@ -167,7 +196,7 @@ class TwitterQueue(AttrToFunc):
         while True:
             try:
                 return self._next(uriparts)
-            except TwitterQueueException:
+            except QueueException:
                 available = filter(lambda x: not x.busy, self.queue)
                 if available:
                     diff = self.get_wait(uriparts)
@@ -177,3 +206,44 @@ class TwitterQueue(AttrToFunc):
                     logger.info("All workers are busy. Waiting %s seconds" % diff)
                 time.sleep(diff)
 
+class StreamWorker(TwitterWorker):
+    api_class = TwitterStream
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+class StreamQueue(QueueMixin):
+    worker_class = StreamWorker
+
+    def __init__(self, wait=True):
+        logger.debug('Creating worker queue')
+        self.queue = set()
+        self.index = 0
+        self.wait = wait
+        AttrToFunc.__init__(self, handler=self.handle_call)
+
+    def handle_call(self, uriparts, *args, **kwargs):
+        logger.debug('Called: {}'.format(uriparts))
+        logger.debug('With: {} {}'.format(args, kwargs))
+        c = None
+        c = self.next(uriparts)
+        c._lock.acquire()
+        c.busy = True
+        logger.debug('Next: {}'.format(c.name))
+        ping = time.time()
+        resp = getattr(c.client, "/".join(uriparts))(*args, **kwargs)
+        for i in resp:
+            yield i
+        pong = time.time()
+        logger.debug('Listening for: {}'.format(pong-ping))
+        c.busy = False
+        c._lock.release()
+
+    def next(self, uriparts):
+        logger.debug('Getting next available')
+        s = list(self.queue)
+        random.shuffle(s)
+        for worker in s:
+            if not worker.busy:
+                return worker
+        raise QueueException('No worker is available')

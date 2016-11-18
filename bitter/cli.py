@@ -46,7 +46,7 @@ def tweet(ctx):
 @click.argument('tweetid')
 @click.pass_context 
 def get_tweet(ctx, tweetid):
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS, 1)
     t = utils.get_tweet(wq, tweetid)
     print(json.dumps(t, indent=2))
         
@@ -56,8 +56,7 @@ def get_tweet(ctx, tweetid):
 @click.pass_context 
 def get_tweet(ctx, query):
     wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
-    c = wq.next()
-    t = utils.search_tweet(c.client, query)
+    t = utils.search_tweet(wq, query)
     print(json.dumps(t, indent=2))
 
 @tweet.command('timeline')
@@ -65,8 +64,7 @@ def get_tweet(ctx, query):
 @click.pass_context 
 def get_tweet(ctx, user):
     wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
-    c = wq.next()
-    t = utils.user_timeline(c.client, user)
+    t = utils.user_timeline(wq, user)
     print(json.dumps(t, indent=2))
 
 @main.group()
@@ -90,8 +88,7 @@ def list_users(ctx, db):
 @click.pass_context 
 def get_user(ctx, user):
     wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
-    c = wq.next()
-    u = utils.get_user(c.client, user)
+    u = utils.get_user(wq, user)
     print(json.dumps(u, indent=2))
 
 @users.command('get')
@@ -330,6 +327,20 @@ def run_server(ctx, consumer_key, consumer_secret):
     from .webserver import app
     app.run(host='0.0.0.0')
     
+@main.group()
+@click.pass_context 
+def stream(ctx):
+    pass
+
+@stream.command('get')
+@click.pass_context 
+def get_stream(ctx):
+    wq = crawlers.StreamQueue.from_credentials(bconf.CREDENTIALS, 1)
+
+    iterator = wq.statuses.sample()
+
+    for tweet in iterator:
+        print(tweet)
 
 if __name__ == '__main__':
     main()
