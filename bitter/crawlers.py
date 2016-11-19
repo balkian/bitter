@@ -74,7 +74,7 @@ class RestWorker(TwitterWorker):
     api_class = Twitter
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super(RestWorker, self).__init__(*args, **kwargs)
         self._limits = None
 
     @property
@@ -210,7 +210,7 @@ class StreamWorker(TwitterWorker):
     api_class = TwitterStream
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super(StreamWorker, self).__init__(*args, **kwargs)
 
 class StreamQueue(QueueMixin):
     worker_class = StreamWorker

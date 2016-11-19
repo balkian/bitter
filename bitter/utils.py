@@ -104,7 +104,7 @@ def read_file(filename, tail=False):
                 if tail:
                     time.sleep(1)
                 else:
-                    return line
+                    return
     
 
 def get_users(wq, ulist, by_name=False, queue=None, max_users=100):

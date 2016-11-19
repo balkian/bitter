@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import click
 import json
 import os
@@ -362,20 +364,24 @@ def get_stream(ctx, locations, track, file):
         file.close()
 
 @stream.command('read')
-@click.option('-f', '--file', help='File to read the stream of tweets from')
+@click.option('-f', '--file', help='File to read the stream of tweets from', required=True)
+@click.option('-t', '--tail', help='Keep reading from the file, like tail', type=bool, default=False)
 @click.pass_context 
-def read_stream(ctx, file):
-    for tweet in utils.read_file(file, tail=True):
-        print('{timestamp_ms}- @{screen_name}: {text}'.format(timestamp_ms=tweet['timestamp_ms'], screen_name=tweet['user']['screen_name'], text=tweet['text']))
+def read_stream(ctx, file, tail):
+    for tweet in utils.read_file(file, tail=tail):
+        try:
+            print(u'{timestamp_ms}- @{screen_name}: {text}'.format(timestamp_ms=tweet['timestamp_ms'], screen_name=tweet['user']['screen_name'], text=tweet['text']))
+        except (KeyError, TypeError):
+            print('Raw tweet: {}'.format(tweet))
 
 @stream.command('tags')
-@click.option('-f', '--file', help='File to read the stream of tweets from')
+@click.option('-f', '--file', help='File to read the stream of tweets from', required=True)
 @click.argument('limit', required=False, default=None, type=int)
 @click.pass_context 
 def tags_stream(ctx, file, limit):
     c = utils.get_hashtags(utils.read_file(file))
     for count, tag in c.most_common(limit):
-        print('{} - {}'.format(count, tag))
+        print(u'{} - {}'.format(count, tag))
     
 
 if __name__ == '__main__':
