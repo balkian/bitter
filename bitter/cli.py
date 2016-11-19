@@ -365,7 +365,7 @@ def get_stream(ctx, locations, track, file):
 
 @stream.command('read')
 @click.option('-f', '--file', help='File to read the stream of tweets from', required=True)
-@click.option('-t', '--tail', help='Keep reading from the file, like tail', type=bool, default=False)
+@click.option('-t', '--tail', is_flag=True, help='Keep reading from the file, like tail', type=bool, default=False)
 @click.pass_context 
 def read_stream(ctx, file, tail):
     for tweet in utils.read_file(file, tail=tail):
