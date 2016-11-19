@@ -12,6 +12,7 @@ from multiprocessing.pool import ThreadPool
 from itertools import islice
 from contextlib import contextmanager
 from itertools import zip_longest
+from collections import Counter
 
 from twitter import TwitterHTTPError
 
@@ -85,6 +86,26 @@ def add_credentials(credfile=None, **creds):
             f.write(json.dumps(creds))
             f.write('\n')
 
+
+def get_hashtags(iter_tweets, best=None):
+    c = Counter()
+    for tweet in iter_tweets:
+        c.update(tag['text'] for tag in tweet.get('entities', {}).get('hashtags', {}))
+    return c
+
+def read_file(filename, tail=False):
+    with open(filename) as f:
+        while True:
+            line = f.readline()
+            if line not in (None, '', '\n'):
+                tweet = json.loads(line.strip())
+                yield tweet
+            else:
+                if tail:
+                    time.sleep(1)
+                else:
+                    return line
+    
 
 def get_users(wq, ulist, by_name=False, queue=None, max_users=100):
     t = 'name' if by_name else 'uid'

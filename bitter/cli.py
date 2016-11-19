@@ -6,6 +6,7 @@ import time
 import sqlalchemy.types
 import threading
 import sqlite3
+from tqdm import tqdm
 
 from sqlalchemy import exists
 
@@ -333,14 +334,49 @@ def stream(ctx):
     pass
 
 @stream.command('get')
+@click.option('-l', '--locations', default=None)
+@click.option('-t', '--track', default=None)
+@click.option('-f', '--file', help='File to store the stream of tweets')
 @click.pass_context 
-def get_stream(ctx):
+def get_stream(ctx, locations, track, file):
     wq = crawlers.StreamQueue.from_credentials(bconf.CREDENTIALS, 1)
 
-    iterator = wq.statuses.sample()
+    query_args = {}
+    if locations:
+        query_args['locations'] = locations
+    if track:
+        query_args['track'] = track
+    if not query_args:
+        iterator = wq.statuses.sample()
+    else:
+        iterator = wq.statuses.filter(**query_args)#"-4.25,40.16,-3.40,40.75")
 
-    for tweet in iterator:
-        print(tweet)
+    if not file:
+        file = sys.stdout
+    else:
+        file = open(file, 'a')
+
+    for tweet in tqdm(iterator):
+        print(json.dumps(tweet), file=file)
+    if file != sys.stdout:
+        file.close()
+
+@stream.command('read')
+@click.option('-f', '--file', help='File to read the stream of tweets from')
+@click.pass_context 
+def read_stream(ctx, file):
+    for tweet in utils.read_file(file, tail=True):
+        print('{timestamp_ms}- @{screen_name}: {text}'.format(timestamp_ms=tweet['timestamp_ms'], screen_name=tweet['user']['screen_name'], text=tweet['text']))
+
+@stream.command('tags')
+@click.option('-f', '--file', help='File to read the stream of tweets from')
+@click.argument('limit', required=False, default=None, type=int)
+@click.pass_context 
+def tags_stream(ctx, file, limit):
+    c = utils.get_hashtags(utils.read_file(file))
+    for count, tag in c.most_common(limit):
+        print('{} - {}'.format(count, tag))
+    
 
 if __name__ == '__main__':
     main()
