@@ -88,20 +88,45 @@ def list_users(ctx, db):
 
 @users.command('get_one')
 @click.argument('user')
-@click.pass_context 
-def get_user(ctx, user):
+@click.option('-w', '--write', is_flag=True, default=False)
+@click.option('-f', '--folder', default="users")
+@click.option('-u', '--update', help="Update the file even if the user exists", is_flag=True, default=False)
+def get_user(user, write, folder, update):
     wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
-    u = utils.get_user(wq, user)
-    print(json.dumps(u, indent=2))
+    if not write:
+        u = utils.get_user(wq, user)
+        js = json.dumps(u, indent=2)
+        print(js)
+        return
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    file = os.path.join(folder, '%s.json' % user)
+    if not update and os.path.exists(file) and os.path.isfile(file):
+        print('User exists: %s' % user)
+        return
+    with open(file, 'w') as f:
+        u = utils.get_user(wq, user)
+        js = json.dumps(u, indent=2)
+        print(js, file=f)
 
 @users.command('get')
+@click.argument('usersfile', 'File with a list of users to look up')
+@click.option('-f', '--folder', default="users")
+@click.pass_context
+def get_users(ctx, usersfile, folder):
+    with open(usersfile) as f:
+        for line in f:
+            uid = line.strip()
+            ctx.invoke(get_user, folder=folder, user=uid, write=True)
+
+@users.command('crawl')
 @click.option('--db', required=True, help='Database to save all users.')
 @click.option('--skip', required=False, default=0, help='Skip N lines from the file.')
 @click.option('--until', required=False, type=str, default=0, help='Skip all lines until ID.')
 @click.option('--threads', required=False, type=str, default=20, help='Number of crawling threads.')
 @click.argument('usersfile', 'File with a list of users to look up')
 @click.pass_context
-def get_users(ctx, usersfile, skip, until, threads, db):
+def crawl_users(ctx, usersfile, skip, until, threads, db):
     global dburl, ids_queue, skipped, enqueued, collected, lastid, db_lock
 
     if '://' not in db:
