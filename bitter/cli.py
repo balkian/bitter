@@ -46,18 +46,45 @@ def tweet(ctx):
     pass
 
 @tweet.command('get')
+@click.option('-w', '--write', is_flag=True, default=False)
+@click.option('-f', '--folder', default="tweets")
+@click.option('-u', '--update', help="Update the file even if the tweet exists", is_flag=True, default=False)
 @click.argument('tweetid')
-@click.pass_context 
-def get_tweet(ctx, tweetid):
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS, 1)
-    t = utils.get_tweet(wq, tweetid)
-    print(json.dumps(t, indent=2))
+def get_tweet(tweetid, write, folder, update):
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    if not write:
+        t = utils.get_tweet(wq, tweetid)
+        js = json.dumps(t, indent=2)
+        print(js)
+        return
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    file = os.path.join(folder, '%s.json' % tweetid)
+    if not update and os.path.exists(file) and os.path.isfile(file):
+        print('%s: Tweet exists' % tweetid)
+        return
+    try:
+        t = utils.get_tweet(wq, tweetid)
+        with open(file, 'w') as f:
+            js = json.dumps(t, indent=2)
+            print(js, file=f)
+    except Exception as ex:
+        print('%s: %s' % (tweetid, ex), file=sys.stderr)
         
+@tweet.command('get_all')
+@click.argument('tweetsfile', 'File with a list of tweets to look up')
+@click.option('-f', '--folder', default="tweets")
+@click.pass_context
+def get_tweets(ctx, tweetsfile, folder):
+    with open(tweetsfile) as f:
+        for line in f:
+            tid = line.strip()
+            ctx.invoke(get_tweet, folder=folder, tweetid=tid, write=True)
 
 @tweet.command('search')
 @click.argument('query')
 @click.pass_context 
-def get_tweet(ctx, query):
+def search(ctx, query):
     wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
     t = utils.search_tweet(wq, query)
     print(json.dumps(t, indent=2))
@@ -65,7 +92,7 @@ def get_tweet(ctx, query):
 @tweet.command('timeline')
 @click.argument('user')
 @click.pass_context 
-def get_tweet(ctx, user):
+def timeline(ctx, user):
     wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
     t = utils.user_timeline(wq, user)
     print(json.dumps(t, indent=2))
@@ -86,7 +113,7 @@ def list_users(ctx, db):
         for j in i.__dict__:
             print('\t{}: {}'.format(j, getattr(i,j)))
 
-@users.command('get_one')
+@users.command('get')
 @click.argument('user')
 @click.option('-w', '--write', is_flag=True, default=False)
 @click.option('-f', '--folder', default="users")
@@ -109,7 +136,7 @@ def get_user(user, write, folder, update):
         js = json.dumps(u, indent=2)
         print(js, file=f)
 
-@users.command('get')
+@users.command('get_all')
 @click.argument('usersfile', 'File with a list of users to look up')
 @click.option('-f', '--folder', default="users")
 @click.pass_context

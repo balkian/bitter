@@ -96,7 +96,10 @@ class RestWorker(TwitterWorker):
 
     def get_limit(self, uriparts):
         uri = '/'+'/'.join(uriparts)
-        return self.limits.get('resources', {}).get(uriparts[0], {}).get(uri, {})
+        for (ix, i) in self.limits.get('resources', {}).get(uriparts[0], {}).items():
+            if ix.startswith(uri):
+                return i
+        return {}
 
     def set_limit(self, uriparts, value):
         uri = '/'+'/'.join(uriparts)
