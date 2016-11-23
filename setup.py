@@ -43,5 +43,14 @@ setup(
     entry_points="""
         [console_scripts]
         bitter=bitter.cli:main
-    """
+    """,
+    classifiers=[
+        'Development Status :: 4 - Beta',
+        'Intended Audience :: Developers',
+        'Intended Audience :: Science/Research',
+        'License :: OSI Approved :: Apache Software License',
+        'Programming Language :: Python :: 2',
+        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3',
+    ]
 )

@@ -391,8 +391,9 @@ def stream(ctx):
 @click.option('-l', '--locations', default=None)
 @click.option('-t', '--track', default=None)
 @click.option('-f', '--file', help='File to store the stream of tweets')
+@click.option('-p', '--politelyretry', help='Politely retry after a hangup/connection error', is_flag=True, default=True)
 @click.pass_context 
-def get_stream(ctx, locations, track, file):
+def get_stream(ctx, locations, track, file, politelyretry):
     wq = crawlers.StreamQueue.from_credentials(bconf.CREDENTIALS, 1)
 
     query_args = {}
@@ -400,17 +401,28 @@ def get_stream(ctx, locations, track, file):
         query_args['locations'] = locations
     if track:
         query_args['track'] = track
-    if not query_args:
-        iterator = wq.statuses.sample()
-    else:
-        iterator = wq.statuses.filter(**query_args)#"-4.25,40.16,-3.40,40.75")
-
     if not file:
         file = sys.stdout
     else:
         file = open(file, 'a')
 
-    for tweet in tqdm(iterator):
+    def insist():
+        lasthangup = time.time()
+        while True:
+            if not query_args:
+                iterator = wq.statuses.sample()
+            else:
+                iterator = wq.statuses.filter(**query_args)#"-4.25,40.16,-3.40,40.75")
+            for i in iterator:
+                yield i
+            if not politelyretry:
+                return
+            thishangup = time.time()
+            if thishangup - lasthangup < 60:
+                raise Exception('Too many hangups in a row.')
+            time.sleep(3)
+
+    for tweet in tqdm(insist()):
         print(json.dumps(tweet), file=file)
     if file != sys.stdout:
         file.close()

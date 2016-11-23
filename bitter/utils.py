@@ -11,7 +11,7 @@ from multiprocessing.pool import ThreadPool
 
 from itertools import islice
 from contextlib import contextmanager
-from itertools import zip_longest
+from future.moves.itertools import zip_longest
 from collections import Counter
 
 from twitter import TwitterHTTPError
