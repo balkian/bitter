@@ -10,6 +10,11 @@ from twitter import *
 from collections import OrderedDict
 from threading import Lock
 from itertools import islice
+try:
+    import itertools.ifilter as filter
+except ImportError:
+    pass
+
 from . import utils
 from . import config
 
@@ -178,9 +183,13 @@ class TwitterQueue(QueueMixin):
                     patience -= 1
 
     def get_wait(self, uriparts):
-        available = next(lambda x: not x.busy, self.queue)
-        first_worker = min(available, key=lambda x: x.get_wait(uriparts))
-        diff = first_worker.get_wait(uriparts)
+        # Stop as soon as one is available to avoid initiating the rest
+        for i in self.queue:
+            if not i.busy and i.get_wait(uriparts) == 0:
+                return 0
+        # If None is available, let's see how much we have to wait
+        available = filter(lambda x: not x.busy, self.queue)
+        diff = min(worker.get_wait(uriparts) for worker in self.queue if not worker.busy)
         return diff
         
 

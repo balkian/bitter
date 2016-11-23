@@ -6,7 +6,7 @@ import datetime
 import time
 
 from bitter import utils
-from bitter.crawlers import TwitterQueue, TwitterWorker, TwitterQueueException
+from bitter.crawlers import TwitterQueue, TwitterWorker, QueueException
 from bitter import config as c
 
 class TestUtils(TestCase):
@@ -64,12 +64,9 @@ class TestUtils(TestCase):
         try:
             # resp = self.wq.friends.list(screen_name='balkian')
             self.wq.next(['friends', 'list'])
-        except TwitterQueueException:
+        except QueueException:
             failed = True
         assert failed
         l2 = w1.get_limit(['friends', 'list'])
         assert self.wq.get_wait(['friends', 'list']) > (l2['reset']-time.time())
         assert self.wq.get_wait(['friends', 'list']) < (l2['reset']-time.time()+2)
-        time.sleep(w1.get_wait(['friends', 'list']))
-
-        
