@@ -52,34 +52,15 @@ def tweet(ctx):
 @click.argument('tweetid')
 def get_tweet(tweetid, write, folder, update):
     wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
-    if not write:
-        t = utils.get_tweet(wq, tweetid)
-        js = json.dumps(t, indent=2)
-        print(js)
-        return
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-    file = os.path.join(folder, '%s.json' % tweetid)
-    if not update and os.path.exists(file) and os.path.isfile(file):
-        print('%s: Tweet exists' % tweetid)
-        return
-    try:
-        t = utils.get_tweet(wq, tweetid)
-        with open(file, 'w') as f:
-            js = json.dumps(t, indent=2)
-            print(js, file=f)
-    except Exception as ex:
-        print('%s: %s' % (tweetid, ex), file=sys.stderr)
+    utils.download_tweet(wq, tweetid, write, folder, update)
         
 @tweet.command('get_all')
 @click.argument('tweetsfile', 'File with a list of tweets to look up')
 @click.option('-f', '--folder', default="tweets")
 @click.pass_context
 def get_tweets(ctx, tweetsfile, folder):
-    with open(tweetsfile) as f:
-        for line in f:
-            tid = line.strip()
-            ctx.invoke(get_tweet, folder=folder, tweetid=tid, write=True)
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    utils.download_tweets(wq, tweetsfile, folder)
 
 @tweet.command('search')
 @click.argument('query')

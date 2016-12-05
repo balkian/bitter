@@ -58,4 +58,6 @@ class TestUtils(TestCase):
         assert list(resp) == [1,2,3]
         toc = time.time()
         assert (tic-toc) < 6000
+        resp2 = utils.parallel(echo, [1,2,3,4], chunksize=2)
+        assert list(resp2) == [1,2,3,4]
         

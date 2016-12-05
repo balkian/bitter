@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import logging
 import time
 import json
@@ -9,10 +11,15 @@ import os
 import multiprocessing
 from multiprocessing.pool import ThreadPool
 
-from itertools import islice
+from tqdm import tqdm
+
+from itertools import islice, chain
+
 from contextlib import contextmanager
 from future.moves.itertools import zip_longest
 from collections import Counter
+
+from builtins import map, filter
 
 from twitter import TwitterHTTPError
 
@@ -27,15 +34,14 @@ def signal_handler(signal, frame):
     logger.info('You pressed Ctrl+C!')
     sys.exit(0)
 
-def chunk(iterable, n, fillvalue=None):
-    args = [iter(iterable)] * n
-    return zip_longest(*args, fillvalue=fillvalue)
+def chunk(iterable, n):
+    it = iter(iterable)
+    return iter(lambda: tuple(islice(it, n)), ())
 
-def parallel(func, source, chunksize=0, numcpus=multiprocessing.cpu_count()):
-    if chunksize:
-        source = chunk(source, chunksize)
-    p = ThreadPool(numcpus)
-    for i in p.imap(func, source):
+def parallel(func, source, chunksize=1, numcpus=multiprocessing.cpu_count()):
+    source = chunk(source, chunksize)
+    p = ThreadPool(numcpus*2)
+    for i in chain.from_iterable(p.imap_unordered(func, source, int(1000/numcpus))):
         yield i
 
 def get_credentials_path(credfile=None):
@@ -155,12 +161,12 @@ def add_user(session, user, enqueue=False):
     user = User(**user)
     session.add(user)
     if extract:
-        logging.debug('Adding entry')
+        logger.debug('Adding entry')
         entry = session.query(ExtractorEntry).filter(ExtractorEntry.user==user.id).first()
         if not entry:
             entry = ExtractorEntry(user=user.id)
             session.add(entry)
-        logging.debug(entry.pending)
+        logger.debug(entry.pending)
         entry.pending = True
         entry.cursor = -1
         session.commit()
@@ -209,10 +215,10 @@ def extract(wq, recursive=False, user=None, initfile=None, dburi=None, extractor
         add_user(session, i, enqueue=True)
 
     total_users = session.query(sqlalchemy.func.count(User.id)).scalar()
-    logging.info('Total users: {}'.format(total_users))
+    logger.info('Total users: {}'.format(total_users))
     def pending_entries():
         pending = session.query(ExtractorEntry).filter(ExtractorEntry.pending == True).count()
-        logging.info('Pending: {}'.format(pending))
+        logger.info('Pending: {}'.format(pending))
         return pending
 
     while pending_entries() > 0:
@@ -276,7 +282,7 @@ def extract(wq, recursive=False, user=None, initfile=None, dburi=None, extractor
 
         entry.pending = pending
         entry.cursor = cursor
-        logging.debug('Entry: {} - {}'.format(entry.user, entry.pending))
+        logger.debug('Entry: {} - {}'.format(entry.user, entry.pending))
 
         session.add(candidate)
         session.commit()
@@ -302,3 +308,85 @@ def get_user(c, user):
         return c.users.lookup(user_id=user)[0]
     except ValueError:
         return c.users.lookup(screen_name=user)[0]
+
+def download_tweet(wq, tweetid, write=True, folder="downloaded_tweets", update=False):
+    cached = cached_tweet(tweetid, folder)
+    newtweet = None
+    if update or not cached:
+        newtweet = get_tweet(wq, tweetid)
+        js = json.dumps(tweet, indent=2)
+    if write:
+        if newtweet:
+            write_tweet_json(js, folder)
+    else:
+        print(js)
+
+
+def cached_tweet(tweetid, folder):
+    tweet = None
+    file = os.path.join(folder, '%s.json' % tweetid)
+    if os.path.exists(file) and os.path.isfile(file):
+        try:
+            # print('%s: Tweet exists' % tweetid)
+            with open(file) as f:
+                tweet = json.load(f)
+        except Exception as ex:
+            logger.error('Error getting cached version of {}: {}'.format(tweetid, ex))
+    return tweet
+
+def write_tweet_json(js, folder):
+    tweetid = js['id']
+    file = tweet_file(tweetid, folder)
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    with open(file, 'w') as f:
+        json.dump(js, f, indent=2)
+        logger.info('Written {} to file {}'.format(tweetid, file))
+
+def tweet_file(tweetid, folder):
+    return os.path.join(folder, '%s.json' % tweetid)
+
+def tweet_fail_file(tweetid, folder):
+    failsfolder = os.path.join(folder, 'failed')
+    if not os.path.exists(failsfolder):
+        os.makedirs(failsfolder)
+    return os.path.join(failsfolder, '%s.failed' % tweetid)
+
+def tweet_failed(tweetid, folder):
+    return os.path.isfile(tweet_fail_file(tweetid, folder))
+
+def download_tweets(wq, tweetsfile, folder, update=False, retry_failed=False, ignore_fails=True):
+    def filter_line(line):
+        tweetid = int(line)
+        # print('Checking {}'.format(tweetid))
+        if (cached_tweet(tweetid, folder) and not update) or (tweet_failed(tweetid, folder) and not retry_failed):
+            yield None
+        else:
+            yield line
+
+    def print_result(res):
+        tid, tweet = res
+        if tweet:
+            try:
+                write_tweet_json(tweet, folder=folder)
+                yield 1
+            except Exception as ex:
+                logger.error('%s: %s' % (tid, ex))
+                if not ignore_fails:
+                    raise
+        else:
+            logger.info('Tweet not recovered: {}'.format(tid))
+            with open(tweet_fail_file(tid, folder), 'w') as f:
+                print('Tweet not found', file=f)
+            yield -1
+
+    def download_batch(batch):
+        tweets = wq.statuses.lookup(_id=",".join(batch), map=True)['id']
+        return tweets.items()
+
+    with open(tweetsfile) as f:
+        lines = map(lambda x: x.strip(), f)
+        lines_to_crawl = filter(lambda x: x is not None, tqdm(parallel(filter_line, lines), desc='Total lines'))
+        tweets = parallel(download_batch, lines_to_crawl, 100)
+        for res in tqdm(parallel(print_result, tweets), desc='Queried'):
+            pass
