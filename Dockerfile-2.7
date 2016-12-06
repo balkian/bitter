@@ -1,0 +1,7 @@
+# onbuild copies . to /usr/src/app/
+From python:2.7-onbuild
+Maintainer J. Fernando Sánchez @balkian
+
+RUN pip install -e "/usr/src/app/[server]"
+
+ENTRYPOINT ["bitter"]

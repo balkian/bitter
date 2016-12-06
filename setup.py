@@ -38,7 +38,7 @@ setup(
     extras_require = {
         'server': ['flask', 'flask-oauthlib']
         },
-    test_suite="tests",
+    setup_requires=['pytest-runner',],
     include_package_data=True,
     entry_points="""
         [console_scripts]

@@ -14,9 +14,13 @@ from multiprocessing.pool import ThreadPool
 from tqdm import tqdm
 
 from itertools import islice, chain
-
 from contextlib import contextmanager
-from future.moves.itertools import zip_longest
+
+try:
+    from itertools import izip_longest
+except ImportError:
+    from itertools import zip_longest
+
 from collections import Counter
 
 from builtins import map, filter

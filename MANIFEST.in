@@ -5,4 +5,6 @@ include README.md
 include bitter/VERSION
 graft bitter/templates
 graft bitter/static
-graft test
+include tests/test*
+global-exclude *.pyc
+global-exclude __pycache__
