@@ -3,6 +3,9 @@ PYMAIN=$(firstword $(PYVERSIONS))
 NAME=bitter
 REPO=balkian
 VERSION=$(shell cat $(NAME)/VERSION)
+TARNAME=$(NAME)-$(VERSION).tar.gz 
+IMAGENAME=$(REPO)/$(NAME)
+IMAGEWTAG=$(IMAGENAME):$(VERSION)
 
 
 all: build run
@@ -11,6 +14,17 @@ dockerfiles: $(addprefix Dockerfile-,$(PYVERSIONS))
 
 Dockerfile-%: Dockerfile.template
 	sed "s/{{PYVERSION}}/$*/" Dockerfile.template > Dockerfile-$*
+
+
+dev-%:
+	@docker start $(NAME)-dev$* || (\
+		$(MAKE) build-$*; \
+		docker run -d -w /usr/src/app/ -v $$PWD:/usr/src/app --entrypoint=/bin/bash -ti --name $(NAME)-dev$* '$(IMAGEWTAG)-python$*'; \
+	)\
+
+	docker exec -ti $(NAME)-dev$* bash
+
+dev: dev-$(PYMAIN)
 
 build: $(addprefix build-, $(PYMAIN))
 

@@ -17,8 +17,8 @@ or
 Programmatically:
 
 ```python
-from bitter.crawlers import TwitterQueue
-wq = TwitterQueue.from_credentials()
+from bitter import easy
+wq = easy()
 print(wq.users.show(user_name='balkian'))
 ```
 

@@ -5,14 +5,14 @@ import types
 import datetime
 import time
 
-from bitter import utils
-from bitter.crawlers import TwitterQueue, TwitterWorker, QueueException
+from bitter import utils, easy
+from bitter.crawlers import QueueException
 from bitter import config as c
 
-class TestUtils(TestCase):
+class TestCrawlers(TestCase):
 
     def setUp(self):
-        self.wq = TwitterQueue.from_credentials(os.path.join(os.path.dirname(__file__), 'credentials.json'))
+        self.wq = easy(os.path.join(os.path.dirname(__file__), 'credentials.json'))
 
     def test_create_worker(self):
         assert len(self.wq.queue)==1
