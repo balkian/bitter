@@ -315,12 +315,12 @@ def get_user(c, user):
 
 def download_tweet(wq, tweetid, write=True, folder="downloaded_tweets", update=False):
     cached = cached_tweet(tweetid, folder)
-    newtweet = None
+    tweet = None
     if update or not cached:
-        newtweet = get_tweet(wq, tweetid)
+        tweet = get_tweet(wq, tweetid)
         js = json.dumps(tweet, indent=2)
     if write:
-        if newtweet:
+        if tweet:
             write_tweet_json(js, folder)
     else:
         print(js)
