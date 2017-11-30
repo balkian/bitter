@@ -11,15 +11,12 @@ import os
 import multiprocessing
 from multiprocessing.pool import ThreadPool
 
+from functools import partial
+
 from tqdm import tqdm
 
 from itertools import islice, chain
 from contextlib import contextmanager
-
-try:
-    from itertools import izip_longest
-except ImportError:
-    from itertools import zip_longest
 
 from collections import Counter
 
@@ -38,15 +35,19 @@ def signal_handler(signal, frame):
     logger.info('You pressed Ctrl+C!')
     sys.exit(0)
 
+
 def chunk(iterable, n):
     it = iter(iterable)
     return iter(lambda: tuple(islice(it, n)), ())
 
+
 def parallel(func, source, chunksize=1, numcpus=multiprocessing.cpu_count()):
     source = chunk(source, chunksize)
     p = ThreadPool(numcpus*2)
-    for i in chain.from_iterable(p.imap_unordered(func, source, int(1000/numcpus))):
+    results = p.imap_unordered(func, source, chunksize=int(1000/numcpus))
+    for i in chain.from_iterable(results):
         yield i
+
 
 def get_credentials_path(credfile=None):
     if not credfile:
@@ -56,16 +57,19 @@ def get_credentials_path(credfile=None):
             raise Exception('No valid credentials file')
     return os.path.expanduser(credfile)
 
+
 @contextmanager
 def credentials_file(credfile, *args, **kwargs):
     p = get_credentials_path(credfile)
     with open(p, *args, **kwargs) as f:
         yield f
 
+
 def iter_credentials(credfile=None):
     with credentials_file(credfile) as f:
         for l in f:
             yield json.loads(l.strip())
+
 
 def get_credentials(credfile=None, inverse=False, **kwargs):
     creds = []
@@ -77,17 +81,20 @@ def get_credentials(credfile=None, inverse=False, **kwargs):
             creds.append(i)
     return creds
 
+
 def create_credentials(credfile=None):
     credfile = get_credentials_path(credfile)
     with credentials_file(credfile, 'a'):
         pass
 
+    
 def delete_credentials(credfile=None, **creds):
     tokeep = get_credentials(credfile, inverse=True, **creds)
     with credentials_file(credfile, 'w') as f:
         for i in tokeep:
             f.write(json.dumps(i))
             f.write('\n')
+
 
 def add_credentials(credfile=None, **creds):
     exist = get_credentials(credfile, **creds)
@@ -103,6 +110,7 @@ def get_hashtags(iter_tweets, best=None):
         c.update(tag['text'] for tag in tweet.get('entities', {}).get('hashtags', {}))
     return c
 
+
 def read_file(filename, tail=False):
     with open(filename) as f:
         while True:
@@ -115,7 +123,7 @@ def read_file(filename, tail=False):
                     time.sleep(1)
                 else:
                     return
-    
+
 
 def get_users(wq, ulist, by_name=False, queue=None, max_users=100):
     t = 'name' if by_name else 'uid'
@@ -144,6 +152,7 @@ def get_users(wq, ulist, by_name=False, queue=None, max_users=100):
             else:
                 yield user
 
+
 def trim_user(user):
     if 'status' in user:
         del user['status']
@@ -157,14 +166,22 @@ def trim_user(user):
     return user
 
 
-def add_user(session, user, enqueue=False):
+def add_user(user, dburi=None, session=None, update=False):
+    if not session:
+        session = make_session(dburi)
+
     user = trim_user(user)
-    olduser = session.query(User).filter(User.id==user['id'])
+    olduser = session.query(User).filter(User.id == user['id'])
     if olduser:
+        if not update:
+            return
         olduser.delete()
-    user = User(**user)
-    session.add(user)
-    if extract:
+    nuser = User()
+    for key, value in user.items():
+        setattr(nuser, key, value)
+    user = nuser
+    if update:
+        session.add(user)
         logger.debug('Adding entry')
         entry = session.query(ExtractorEntry).filter(ExtractorEntry.user==user.id).first()
         if not entry:
@@ -174,125 +191,193 @@ def add_user(session, user, enqueue=False):
         entry.pending = True
         entry.cursor = -1
         session.commit()
+    session.close()
 
 
-# TODO: adapt to the crawler
+def download_entry(wq, entry_id, dburi=None, recursive=False):
+    session = make_session(dburi)
+    if not session:
+        raise Exception("Provide dburi or session")
+    logger.info("Downloading entry: %s (%s)" % (entry_id, type(entry_id)))
+    entry = session.query(ExtractorEntry).filter(ExtractorEntry.id==entry_id).first()
+    user = session.query(User).filter(User.id == entry.user).first()
+    download_user(wq, session, user, entry, recursive)
+    session.close()
+
+
+def download_user(wq, session, user, entry=None, recursive=False, max_followers=50000):
+
+    total_followers = user.followers_count
+
+    if total_followers > max_followers:
+        entry.pending = False
+        logger.info("Too many followers for user: %s" % user.screen_name)
+        session.add(entry)
+        session.commit()
+        return
+
+    if not entry:
+        entry = session.query(ExtractorEntry).filter(ExtractorEntry.user==user.id).first() or ExtractorEntry(user=user.id)
+    session.add(entry)
+    session.commit()
+
+    pending = True
+    cursor = entry.cursor
+    uid = user.id
+    name = user.name
+
+    logger.info("#"*20)
+    logger.info("Getting %s - %s" % (uid, name))
+    logger.info("Cursor %s" % cursor)
+    logger.info("Using account: %s" % wq.name)
+
+    _fetched_followers = 0
+
+    def fetched_followers():
+        return session.query(Following).filter(Following.isfollowed==uid).count()
+
+    attempts = 0
+    while cursor > 0 or fetched_followers() < total_followers:
+        try:
+            resp = wq.followers.ids(user_id=uid, cursor=cursor)
+        except TwitterHTTPError as ex:
+            attempts += 1
+            if ex.e.code in (401, ) or attempts > 3:
+                logger.info('Not authorized for user: {}'.format(uid))
+                entry.errors = ex.message
+                break
+        if 'ids' not in resp:
+            logger.info("Error with id %s %s" % (uid, resp))
+            entry.pending = False
+            entry.errors = "No ids in response: %s" % resp
+            break
+
+        logger.info("New followers: %s" % len(resp['ids']))
+        if recursive:
+            newusers = get_users(wq, resp)
+            for newuser in newusers:
+                add_user(session=session, user=newuser)
+
+        if 'ids' not in resp or not resp['ids']:
+            logger.info('NO IDS in response')
+            break
+        for i in resp['ids']:
+            existing_user = session.query(Following).\
+                            filter(Following.isfollowed == uid).\
+                            filter(Following.follower == i).first()
+            now = int(time.time())
+            if existing_user:
+                existing_user.created_at_stamp = now
+            else:
+                f = Following(isfollowed=uid,
+                              follower=i,
+                              created_at_stamp=now)
+                session.add(f)
+
+        logger.info("Fetched: %s/%s followers" % (fetched_followers(),
+                                                  total_followers))
+        entry.cursor = resp["next_cursor"]
+
+        session.add(entry)
+        session.commit()
+
+    logger.info("Done getting followers for %s" % uid)
+
+    entry.pending = False
+    entry.busy = False
+    session.add(entry)
+    session.commit()
+
+    logger.debug('Entry: {} - {}'.format(entry.user, entry.pending))
+    sys.stdout.flush()
+
+
+def classify_user(id_or_name, screen_names, user_ids):
+    try:
+        int(id_or_name)
+        user_ids.append(id_or_name)
+        logger.debug("Added user id")
+    except ValueError:
+        logger.debug("Added screen_name")
+        screen_names.append(id_or_name.split('@')[-1])
+
+
 def extract(wq, recursive=False, user=None, initfile=None, dburi=None, extractor_name=None):
     signal.signal(signal.SIGINT, signal_handler)
 
-    w = wq.next()
     if not dburi:
         dburi = 'sqlite:///%s.db' % extractor_name
 
     session = make_session(dburi)
+    session.query(ExtractorEntry).update({ExtractorEntry.busy: False})
+    session.commit()
 
-    screen_names = []
-    user_ids = []
 
-    def classify_user(id_or_name):
-        try:
-            int(user)
-            user_ids.append(user)
-            logger.info("Added user id")
-        except ValueError:
-            logger.info("Added screen_name")
-            screen_names.append(user.split('@')[-1])
-
-    if user:
-        classify_user(user)
-
-    elif initfile:
-        logger.info("No user. I will open %s" % initfile)
-        with open(initfile, 'r') as f:
-            for line in f:
-                user = line.strip().split(',')[0]
-                classify_user(user)
-    else:
+    if not (user or initfile):
         logger.info('Using pending users from last session')
+    else:
+        screen_names = []
+        user_ids = []
+        if user:
+            classify_user(user, screen_names, user_ids)
+        elif initfile:
+            logger.info("No user. I will open %s" % initfile)
+            with open(initfile, 'r') as f:
+                for line in f:
+                    user = line.strip().split(',')[0]
+                    classify_user(user, screen_names, user_ids)
 
+        def missing_user(ix, column=User.screen_name):
+            res = session.query(User).filter(column == ix).count() == 0
+            if res:
+                logger.info("Missing user %s. Count: %s" % (ix, res))
+            return res
 
-    nusers = list(get_users(wq, screen_names, by_name=True))
-    if user_ids:
-        nusers += list(get_users(wq, user_ids, by_name=False))
+        screen_names = list(filter(missing_user, screen_names))
+        user_ids = list(filter(partial(missing_user, column=User.id_str), user_ids))
+        nusers = []
+        logger.info("Missing user ids: %s" % user_ids)
+        logger.info("Missing screen names: %s" % screen_names)
+        if screen_names:
+            nusers = list(get_users(wq, screen_names, by_name=True))
+        if user_ids:
+            nusers += list(get_users(wq, user_ids, by_name=False))
 
-    for i in nusers:
-        add_user(session, i, enqueue=True)
+        for i in nusers:
+            add_user(dburi=dburi, user=i)
 
     total_users = session.query(sqlalchemy.func.count(User.id)).scalar()
     logger.info('Total users: {}'.format(total_users))
-    def pending_entries():
-        pending = session.query(ExtractorEntry).filter(ExtractorEntry.pending == True).count()
-        logger.info('Pending: {}'.format(pending))
-        return pending
 
-    while pending_entries() > 0:
-        logger.info("Using account: %s" % w.name)
+    de = partial(download_entry, wq, dburi=dburi)
+    pending = pending_entries(dburi)
+    session.close()
+
+    for i in tqdm(parallel(de, pending), desc='Downloading users', total=total_users):
+        logger.info("Got %s" % i)
+
+
+def pending_entries(dburi):
+    session = make_session(dburi)
+    while True:
         candidate, entry = session.query(User, ExtractorEntry).\
-                           filter(ExtractorEntry.user == User.id).\
-                           filter(ExtractorEntry.pending == True).\
-                           order_by(User.followers_count).first()
-        if not candidate:
-            break
-        pending = True
-        cursor = entry.cursor
-        uid = candidate.id
-        uobject = session.query(User).filter(User.id==uid).first()
-        name = uobject.screen_name if uobject else None
-
-        logger.info("#"*20)
-        logger.info("Getting %s - %s" % (uid, name))
-        logger.info("Cursor %s" % cursor)
-        logger.info("Pending: %s/%s" % (session.query(ExtractorEntry).filter(ExtractorEntry.pending==True).count(), total_users))
-        try:
-            resp = wq.followers.ids(user_id=uid, cursor=cursor)
-        except TwitterHTTPError as ex:
-            if ex.e.code in (401, ):
-                logger.info('Not authorized for user: {}'.format(uid))
-                resp = {}
-        if 'ids' in resp:
-            logger.info("New followers: %s" % len(resp['ids']))
-            if recursive:
-                newusers = get_users(wq, resp)
-                for user in newusers:
-                    add_user(session, newuser, enqueue=True)
-            for i in resp['ids']:
-                existing_user = session.query(Following).\
-                                filter(Following.isfollowed==uid).\
-                                filter(Following.follower==i).first()
-                now = int(time.time())
-                if existing_user:
-                    existing_user.created_at_stamp = now
-                else:
-                    f = Following(isfollowed=uid,
-                                  follower=i,
-                                  created_at_stamp=now)
-                    session.add(f)
-
-            total_followers = candidate.followers_count
-            fetched_followers = session.query(Following).filter(Following.isfollowed==uid).count()
-            logger.info("Fetched: %s/%s followers" % (fetched_followers,
-                                                      total_followers))
-            cursor = resp["next_cursor"]
-            if cursor > 0:
-                pending = True
-                logger.info("Getting more followers for %s" % uid)
-            else:
-                logger.info("Done getting followers for %s" % uid)
-                cursor = -1
-                pending = False
-        else:
-            logger.info("Error with id %s %s" % (uid, resp))
-            pending = False
-
-        entry.pending = pending
-        entry.cursor = cursor
-        logger.debug('Entry: {} - {}'.format(entry.user, entry.pending))
-
-        session.add(candidate)
-        session.commit()
-
-        sys.stdout.flush()
-
+                        filter(ExtractorEntry.user == User.id).\
+                        filter(ExtractorEntry.pending == True).\
+                        filter(ExtractorEntry.busy == False).\
+                        order_by(User.followers_count).first()
+        if candidate:
+            entry.busy = True
+            session.add(entry)
+            session.commit()
+            yield int(entry.id)
+            continue
+        if session.query(ExtractorEntry).\
+            filter(ExtractorEntry.busy == True).count() > 0:
+            time.sleep(1)
+            continue
+        logger.info("No more pending entries")
+        break
+    session.close()
 
 def get_tweet(c, tid):
     return c.statuses.show(id=tid)
@@ -394,3 +479,36 @@ def download_tweets(wq, tweetsfile, folder, update=False, retry_failed=False, ig
         tweets = parallel(download_batch, lines_to_crawl, 100)
         for res in tqdm(parallel(print_result, tweets), desc='Queried'):
             pass
+
+def download_timeline(wq, user):
+    return wq.statuses.user_timeline(id=user)
+
+
+def consume_feed(func, *args, **kwargs):
+    '''
+    Get all the tweets using pagination and a given method.
+    It can be controlled with the `count` parameter.
+
+    If count < 0 => Loop until the whole feed is consumed.
+    If count == 0 => Only call the API once, with the default values.
+    If count > 0 => Get count tweets from the feed.
+    '''
+    remaining = int(kwargs.pop('count', 0))
+    consume = remaining < 0
+    limit = False
+
+    # Simulate a do-while by updating the condition at the end
+    while not limit:
+        if remaining > 0:
+            kwargs['count'] = remaining
+        resp = func(*args, **kwargs)
+        if not resp:
+            return
+        for t in resp:
+            yield t
+        if consume:
+            continue
+        remaining -= len(resp)
+        max_id = min(s['id'] for s in func(*args, **kwargs)) - 1
+        kwargs['max_id'] = max_id
+        limit = remaining <= 0

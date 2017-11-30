@@ -22,6 +22,13 @@ wq = easy()
 print(wq.users.show(user_name='balkian'))
 ```
 
+
+You can also make custom calls to the API through the command line.
+e.g. to get the latest 500 tweets by the python software foundation:
+
+```
+bitter api statuses/user_timeline --id thepsf --count 500
+```
 # Credentials format
 
 ```

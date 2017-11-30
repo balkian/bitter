@@ -240,11 +240,6 @@ def crawl_users(ctx, usersfile, skip, until, threads, db):
             
     logger.info('Done!')
 
-@main.group('api')
-def api():
-    pass
-
-
 @main.group('extractor')
 @click.pass_context
 @click.option('--db', required=True, help='Database of users.')
@@ -332,7 +327,7 @@ def reset_extractor(ctx):
     session = make_session(db)
     session.query(ExtractorEntry).filter(ExtractorEntry.pending==True).update({'pending':False})
 
-@api.command('limits')
+@main.command('limits')
 @click.argument('url', required=False)
 @click.pass_context
 def get_limits(ctx, url):
@@ -352,6 +347,32 @@ def get_limits(ctx, url):
             print('{}: {}'.format(url, limit))           
         else:
             print(json.dumps(resp, indent=2))
+
+
+@main.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=False))
+@click.argument('cmd', nargs=1)
+@click.argument('api_args', nargs=-1, type=click.UNPROCESSED)
+@click.pass_context
+def api(ctx, cmd, api_args):
+    opts = {}
+    i = iter(api_args)
+    for k, v in zip(i, i):
+        k = k.replace('--', '')
+        opts[k] = v
+    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    resp = utils.consume_feed(wq[cmd], **opts)
+    # A hack to stream jsons
+    print('[')
+    first = True
+    for i in resp:
+        if not first:
+            print(',')
+        else:
+            first = False
+        
+        print(json.dumps(i, indent=2))
+    print(']')
+
 
 @main.command('server')
 @click.argument('CONSUMER_KEY', required=True)

@@ -10,6 +10,7 @@ from twitter import *
 from collections import OrderedDict
 from threading import Lock
 from itertools import islice
+from functools import partial
 try:
     import itertools.ifilter as filter
 except ImportError:
@@ -37,6 +38,9 @@ class AttrToFunc(object):
             return extend_call
         else:
             return extend_call(k)
+
+    def __getitem__(self, k):
+        return partial(self.handler, self.__uriparts+k.split('/'))
 
     def __call__(self, *args, **kwargs):
         # for i, a in enumerate(args)e
@@ -74,6 +78,12 @@ class TwitterWorker(object):
                        self.cred['consumer_secret'])
             self._client = self.api_class(auth=auth)
         return self._client
+
+    def __repr__(self):
+        msg = '<{} for {}>'.format(self.__class__.__name__, self.name)
+        if self.busy:
+            msg += ' [busy]'
+        return msg
 
 class RestWorker(TwitterWorker):
     api_class = Twitter

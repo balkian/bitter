@@ -3,6 +3,7 @@ import json
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.types import BigInteger, Integer, Text, Boolean
+from sqlalchemy.pool import SingletonThreadPool
 from sqlalchemy import Column, Index
 
 from sqlalchemy import create_engine
@@ -85,15 +86,19 @@ class ExtractorEntry(Base):
     user = Column(BigInteger, index=True)
     cursor = Column(BigInteger, default=-1)
     pending = Column(Boolean, default=False)
+    errors = Column(Text, default="")
+    busy = Column(Boolean, default=False)
+
 
 def make_session(url):
-    engine = create_engine(url)#, echo=True)
+    if not isinstance(url, str):
+        print(url)
+        raise Exception("FUCK")
+    engine = create_engine(url, poolclass=SingletonThreadPool)#, echo=True)
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
     return session
-    
-
 
 def test(db='sqlite:///users.db'):
 
