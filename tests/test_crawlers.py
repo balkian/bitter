@@ -12,7 +12,11 @@ from bitter import config as c
 class TestCrawlers(TestCase):
 
     def setUp(self):
-        self.wq = easy(os.path.join(os.path.dirname(__file__), 'credentials.json'))
+        CONF_PATH = os.path.join(os.path.dirname(__file__), '.bitter.yaml')
+        if os.path.exists(CONF_PATH):
+            self.wq = easy(CONF_PATH)
+        else:
+            self.wq = easy()
 
     def test_create_worker(self):
         assert len(self.wq.queue)==1

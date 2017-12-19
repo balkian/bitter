@@ -19,7 +19,7 @@ Dockerfile-%: Dockerfile.template
 dev-%:
 	@docker start $(NAME)-dev$* || (\
 		$(MAKE) build-$*; \
-		docker run -d -w /usr/src/app/ -v $$PWD:/usr/src/app --entrypoint=/bin/bash -ti --name $(NAME)-dev$* '$(IMAGEWTAG)-python$*'; \
+		docker run -d -w /usr/src/app/ --env-file $$PWD/.env -v $$PWD:/usr/src/app --entrypoint=/bin/bash -ti --name $(NAME)-dev$* '$(IMAGEWTAG)-python$*'; \
 	)\
 
 	docker exec -ti $(NAME)-dev$* bash
@@ -71,6 +71,6 @@ pip_upload:
 pip_test: $(addprefix pip_test-,$(PYVERSIONS))
 
 run: build
-	docker run --rm -p 5000:5000 -ti '$(REPO)/$(NAME):$(VERSION)-python$(PYMAIN)'
+	docker run --rm --env-file $$PWD/.env -p 5000:5000 -ti '$(REPO)/$(NAME):$(VERSION)-python$(PYMAIN)'
 
 .PHONY: test test-% build-% build test test_pip run

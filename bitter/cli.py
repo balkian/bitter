@@ -29,16 +29,17 @@ logger = logging.getLogger(__name__)
 @click.group()
 @click.option("--verbose", is_flag=True)
 @click.option("--logging_level", required=False, default='WARN')
-@click.option("--config", required=False)
-@click.option('-c', '--credentials', show_default=True, default='~/.bitter-credentials.json')
+@click.option('--config', show_default=True, default=bconf.CONFIG_FILE)
+@click.option('--credentials', show_default=True, help="DEPRECATED: If specified, these credentials will be copied to the configuratation file.", default=bconf.CREDENTIALS)
 @click.pass_context
 def main(ctx, verbose, logging_level, config, credentials):
     logging.basicConfig(level=getattr(logging, logging_level))
     ctx.obj = {}
     ctx.obj['VERBOSE'] = verbose
-    ctx.obj['CONFIG'] = config
+    bconf.CONFIG_FILE = config
     bconf.CREDENTIALS = credentials
-    utils.create_credentials(credentials)
+    if os.path.exists(utils.get_config_path(credentials)):
+      utils.copy_credentials_to_config(credentials, config)
 
 @main.group()
 @click.pass_context 
@@ -51,7 +52,7 @@ def tweet(ctx):
 @click.option('-u', '--update', help="Update the file even if the tweet exists", is_flag=True, default=False)
 @click.argument('tweetid')
 def get_tweet(tweetid, write, folder, update):
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
     utils.download_tweet(wq, tweetid, write, folder, update)
         
 @tweet.command('get_all')
@@ -59,14 +60,14 @@ def get_tweet(tweetid, write, folder, update):
 @click.option('-f', '--folder', default="tweets")
 @click.pass_context
 def get_tweets(ctx, tweetsfile, folder):
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
     utils.download_tweets(wq, tweetsfile, folder)
 
 @tweet.command('search')
 @click.argument('query')
 @click.pass_context 
 def search(ctx, query):
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
     t = utils.search_tweet(wq, query)
     print(json.dumps(t, indent=2))
 
@@ -74,7 +75,7 @@ def search(ctx, query):
 @click.argument('user')
 @click.pass_context 
 def timeline(ctx, user):
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
     t = utils.user_timeline(wq, user)
     print(json.dumps(t, indent=2))
 
@@ -100,7 +101,7 @@ def list_users(ctx, db):
 @click.option('-f', '--folder', default="users")
 @click.option('-u', '--update', help="Update the file even if the user exists", is_flag=True, default=False)
 def get_user(user, write, folder, update):
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
     if not write:
         u = utils.get_user(wq, user)
         js = json.dumps(u, indent=2)
@@ -146,7 +147,7 @@ def crawl_users(ctx, usersfile, skip, until, threads, db):
             return ExitStack()
 
 
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
     logger.info('Starting Network crawler with {} threads and {} credentials.'.format(threads,
                                                                                       len(wq.queue)))
 
@@ -310,7 +311,7 @@ def users_extractor(ctx):
 @click.pass_context
 def extract(ctx, recursive, user, name, initfile):
     print(locals())
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
     dburi = ctx.obj['DBURI']
     utils.extract(wq,
                   recursive=recursive,
@@ -322,7 +323,7 @@ def extract(ctx, recursive, user, name, initfile):
 @extractor.command('reset')
 @click.pass_context
 def reset_extractor(ctx):
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
     db = ctx.obj['DBURI']
     session = make_session(db)
     session.query(ExtractorEntry).filter(ExtractorEntry.pending==True).update({'pending':False})
@@ -331,7 +332,7 @@ def reset_extractor(ctx):
 @click.argument('url', required=False)
 @click.pass_context
 def get_limits(ctx, url):
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
+    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
     for worker in wq.queue:
         resp = worker.client.application.rate_limit_status()
         print('#'*20)
@@ -351,27 +352,27 @@ def get_limits(ctx, url):
 
 @main.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=False))
 @click.argument('cmd', nargs=1)
+@click.option('--tweets', is_flag=True, help='Fetch more tweets using smart pagination. Use --count to control how many tweets to fetch per call, and --max_count to set the number of desired tweets (or -1 to get as many as possible).', type=bool, default=False)
+@click.option('--users', is_flag=True, help='Fetch more users using smart pagination. Use --count to control how many users to fetch per call, and --max_count to set the number of desired users (or -1 to get as many as possible).', type=bool, default=False)
 @click.argument('api_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
-def api(ctx, cmd, api_args):
+def api(ctx, cmd, tweets, users, api_args):
     opts = {}
     i = iter(api_args)
     for k, v in zip(i, i):
         k = k.replace('--', '')
         opts[k] = v
-    wq = crawlers.TwitterQueue.from_credentials(bconf.CREDENTIALS)
-    resp = utils.consume_feed(wq[cmd], **opts)
-    # A hack to stream jsons
-    print('[')
-    first = True
+    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
+    if tweets:
+        resp = utils.consume_tweets(wq[cmd], **opts)
+    elif users:
+        resp = utils.consume_users(wq[cmd], **opts)
+    else:
+        resp = wq[cmd](**opts)
+        print(json.dumps(resp))
+        return
     for i in resp:
-        if not first:
-            print(',')
-        else:
-            first = False
-        
-        print(json.dumps(i, indent=2))
-    print(']')
+        print(json.dumps(i))
 
 
 @main.command('server')
@@ -383,7 +384,7 @@ def run_server(ctx, consumer_key, consumer_secret):
     bconf.CONSUMER_SECRET = consumer_secret
     from .webserver import app
     app.run(host='0.0.0.0')
-    
+
 @main.group()
 @click.pass_context 
 def stream(ctx):
@@ -396,7 +397,7 @@ def stream(ctx):
 @click.option('-p', '--politelyretry', help='Politely retry after a hangup/connection error', is_flag=True, default=True)
 @click.pass_context 
 def get_stream(ctx, locations, track, file, politelyretry):
-    wq = crawlers.StreamQueue.from_credentials(bconf.CREDENTIALS, 1)
+    wq = crawlers.StreamQueue.from_config(bconf.CONFIG_FILE, 1)
 
     query_args = {}
     if locations:

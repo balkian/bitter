@@ -3,6 +3,8 @@ from __future__ import print_function
 import logging
 import time
 import json
+import yaml
+import io
 
 import signal
 import sys
@@ -49,31 +51,74 @@ def parallel(func, source, chunksize=1, numcpus=multiprocessing.cpu_count()):
         yield i
 
 
-def get_credentials_path(credfile=None):
-    if not credfile:
-        if config.CREDENTIALS:
-            credfile = config.CREDENTIALS
+def get_config_path(conf=None):
+    if not conf:
+        if config.CONFIG_FILE:
+            conf = config.CONFIG_FILE
         else:
-            raise Exception('No valid credentials file')
-    return os.path.expanduser(credfile)
+            raise Exception('No valid config file')
+    return os.path.expanduser(conf)
+
+
+def copy_credentials_to_config(credfile, conffile=None):
+      p = get_config_path(credfile)
+      with open(p) as old:
+          for line in old:
+              cred = json.loads(line.strip())
+              add_credentials(conffile, **cred)
+
+
+def save_config(conf, conffile=None):
+    with config(conffile) as c:
+        c.clear()
+        c.update(conf)
 
 
 @contextmanager
-def credentials_file(credfile, *args, **kwargs):
-    p = get_credentials_path(credfile)
-    with open(p, *args, **kwargs) as f:
-        yield f
+def config(conffile=None):
+    d = read_config(conffile)
+    try:
+        yield d
+    finally:
+        write_config(d, conffile)
 
 
-def iter_credentials(credfile=None):
-    with credentials_file(credfile) as f:
-        for l in f:
-            yield json.loads(l.strip())
+def read_config(conffile):
+    p = conffile and get_config_path(conffile)
+    if p and os.path.exists(p):
+        f = open(p, 'r')
+    elif 'BITTER_CONFIG' not in os.environ:
+        raise Exception('No config file or BITTER_CONFIG env variable.')
+    else:
+        f = io.StringIO(os.environ.get('BITTER_CONFIG', "").strip().replace('\\n', '\n'))
+    return yaml.load(f) or {'credentials': []}
 
 
-def get_credentials(credfile=None, inverse=False, **kwargs):
+def write_config(conf, conffile=None):
+    if conffile:
+        p = get_config_path(conffile)
+        with open(p, 'w') as f:
+            yaml.dump(conf, f)
+    else:
+        os.environ['BITTER_CONFIG'] = yaml.dump(conf)
+
+def iter_credentials(conffile=None):
+    with config(conffile) as c:
+        for i in c['credentials']:
+            yield i
+
+
+def create_config_file(conffile=None):
+    if not conffile:
+        return
+    conffile = get_config_path(conffile)
+    with open(conffile, 'a'):
+        pass
+
+    
+def get_credentials(conffile=None, inverse=False, **kwargs):
     creds = []
-    for i in iter_credentials(credfile):
+    for i in iter_credentials(conffile):
         matches = all(map(lambda x: i[x[0]] == x[1], kwargs.items()))
         if matches and not inverse:
             creds.append(i)
@@ -82,26 +127,18 @@ def get_credentials(credfile=None, inverse=False, **kwargs):
     return creds
 
 
-def create_credentials(credfile=None):
-    credfile = get_credentials_path(credfile)
-    with credentials_file(credfile, 'a'):
-        pass
-
-    
-def delete_credentials(credfile=None, **creds):
-    tokeep = get_credentials(credfile, inverse=True, **creds)
-    with credentials_file(credfile, 'w') as f:
-        for i in tokeep:
-            f.write(json.dumps(i))
-            f.write('\n')
+def delete_credentials(conffile=None, **creds):
+    tokeep = get_credentials(conffile, inverse=True, **creds)
+    with config(conffile) as c:
+        c['credentials'] = list(tokeep)
 
 
-def add_credentials(credfile=None, **creds):
-    exist = get_credentials(credfile, **creds)
-    if not exist:
-        with credentials_file(credfile, 'a') as f:
-            f.write(json.dumps(creds))
-            f.write('\n')
+def add_credentials(conffile=None, **creds):
+    exist = get_credentials(conffile, **creds)
+    if exist:
+        return
+    with config(conffile) as c:
+        c['credentials'].append(creds)
 
 
 def get_hashtags(iter_tweets, best=None):
@@ -116,7 +153,7 @@ def read_file(filename, tail=False):
         while True:
             line = f.readline()
             if line not in (None, '', '\n'):
-                tweet = json.loads(line.strip())
+                tweet = json.load(line.strip())
                 yield tweet
             else:
                 if tail:
@@ -403,7 +440,7 @@ def download_tweet(wq, tweetid, write=True, folder="downloaded_tweets", update=F
     tweet = None
     if update or not cached:
         tweet = get_tweet(wq, tweetid)
-        js = json.dumps(tweet, indent=2)
+        js = json.dump(tweet, indent=2)
     if write:
         if tweet:
             write_tweet_json(js, folder)
@@ -484,31 +521,72 @@ def download_timeline(wq, user):
     return wq.statuses.user_timeline(id=user)
 
 
-def consume_feed(func, *args, **kwargs):
+def _consume_feed(func, feed_control=None, **kwargs):
     '''
     Get all the tweets using pagination and a given method.
     It can be controlled with the `count` parameter.
 
-    If count < 0 => Loop until the whole feed is consumed.
-    If count == 0 => Only call the API once, with the default values.
-    If count > 0 => Get count tweets from the feed.
+    If max_count < 0 => Loop until the whole feed is consumed.
+    If max_count == 0 => Only call the API once, with the default values.
+    If max_count > 0 => Get max_count tweets from the feed.
     '''
-    remaining = int(kwargs.pop('count', 0))
-    consume = remaining < 0
+    remaining = int(kwargs.pop('max_count', 0))
+    count = int(kwargs.get('count', -1))
     limit = False
 
-    # Simulate a do-while by updating the condition at the end
-    while not limit:
-        if remaining > 0:
-            kwargs['count'] = remaining
-        resp = func(*args, **kwargs)
-        if not resp:
-            return
-        for t in resp:
-            yield t
-        if consume:
-            continue
-        remaining -= len(resp)
-        max_id = min(s['id'] for s in func(*args, **kwargs)) - 1
-        kwargs['max_id'] = max_id
-        limit = remaining <= 0
+    # We need to at least perform a query, so we simulate a do-while
+    # by running once with no limit and updating the condition at the end
+    with tqdm(total=remaining) as pbar:
+      while not limit:
+          if remaining > 0 and  ((count < 0) or (count > remaining)):
+              kwargs['count'] = remaining
+          resp, stop = feed_control(func, kwargs, remaining=remaining, batch_size=count)
+          if not resp:
+              return
+          for entry in resp:
+              yield entry
+          pbar.update(len(resp))
+          limit = stop
+          if remaining < 0:
+              # If the loop was run with a negative remaining, it will only stop
+              # when the control function tells it to.
+              continue
+          # Otherwise, check if we have already downloaded all the required items
+          remaining -= len(resp)
+          limit = limit or remaining <= 0
+
+
+def consume_tweets(*args, **kwargs):
+    return _consume_feed(*args, feed_control=_tweets_control, **kwargs)
+
+
+def consume_users(*args, **kwargs):
+    return _consume_feed(*args, feed_control=_users_control, **kwargs)
+
+
+def _tweets_control(func, apiargs, remaining=0, **kwargs):
+    ''' Return a list of entries, the remaining '''
+    
+    resp = func(**apiargs)
+    if not resp:
+        return None, True
+    # Update the arguments for the next call
+    # Two options: either resp is a list, or a dict like:
+    #    {'statuses': ... 'search_metadata': ...}
+    if isinstance(resp, dict) and 'search_metadata' in resp:
+        resp = resp['statuses']
+    max_id = min(s['id'] for s in resp) - 1
+    apiargs['max_id'] = max_id
+    return resp, False
+
+
+def _users_control(func, apiargs, remaining=0, **kwargs):
+    resp = func(**apiargs)
+    stop = True
+    # Update the arguments for the next call
+    if 'next_cursor' in resp:
+        cursor = resp['next_cursor']
+        apiargs['cursor'] = cursor
+        if int(cursor) != -1:
+            stop = False
+    return resp['users'], stop

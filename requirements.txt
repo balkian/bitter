@@ -2,3 +2,4 @@ sqlalchemy
 twitter
 click
 tqdm
+pyyaml

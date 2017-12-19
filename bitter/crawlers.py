@@ -58,6 +58,16 @@ class FromCredentialsMixin(object):
             wq.ready(cls.worker_class(cred["user"], cred))
         return wq
     
+class FromConfigMixin(object):
+
+    @classmethod
+    def from_config(cls, conffile=None, max_workers=None):
+        wq = cls()
+
+        with utils.config(conffile) as c:
+          for cred in islice(c['credentials'], max_workers):
+              wq.ready(cls.worker_class(cred["user"], cred))
+        return wq
 
 class TwitterWorker(object):
     api_class = None
@@ -110,6 +120,7 @@ class RestWorker(TwitterWorker):
         return max(0, (reset-now))
 
     def get_limit(self, uriparts):
+        uriparts = list(u for u in uriparts if u)
         uri = '/'+'/'.join(uriparts)
         for (ix, i) in self.limits.get('resources', {}).get(uriparts[0], {}).items():
             if ix.startswith(uri):
@@ -142,7 +153,7 @@ class RestWorker(TwitterWorker):
 class QueueException(BaseException):
     pass
 
-class QueueMixin(AttrToFunc, FromCredentialsMixin):
+class QueueMixin(AttrToFunc, FromCredentialsMixin, FromConfigMixin):
     def __init__(self, wait=True):
         logger.debug('Creating worker queue')
         self.queue = set()

@@ -11,3 +11,4 @@ E.g.:
     app.run()
 '''
 CREDENTIALS = '~/.bitter-credentials.json'
+CONFIG_FILE = '~/.bitter.yaml'
