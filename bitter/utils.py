@@ -153,7 +153,7 @@ def read_file(filename, tail=False):
         while True:
             line = f.readline()
             if line not in (None, '', '\n'):
-                tweet = json.load(line.strip())
+                tweet = json.loads(line.strip())
                 yield tweet
             else:
                 if tail:
@@ -440,7 +440,7 @@ def download_tweet(wq, tweetid, write=True, folder="downloaded_tweets", update=F
     tweet = None
     if update or not cached:
         tweet = get_tweet(wq, tweetid)
-        js = json.dump(tweet, indent=2)
+        js = json.dumps(tweet, indent=2)
     if write:
         if tweet:
             write_tweet_json(js, folder)
