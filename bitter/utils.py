@@ -30,6 +30,12 @@ from bitter.models import Following, User, ExtractorEntry, make_session
 
 from bitter import config
 
+# Fix Python 2.x.
+try:
+    UNICODE_EXISTS = bool(type(unicode))
+except NameError:
+    unicode = lambda s: str(s)
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,7 +96,7 @@ def read_config(conffile):
     elif 'BITTER_CONFIG' not in os.environ:
         raise Exception('No config file or BITTER_CONFIG env variable.')
     else:
-        f = io.StringIO(os.environ.get('BITTER_CONFIG', "").strip().replace('\\n', '\n'))
+        f = io.StringIO(unicode(os.environ.get('BITTER_CONFIG', "")).strip().replace('\\n', '\n'))
     return yaml.load(f) or {'credentials': []}
 
 
