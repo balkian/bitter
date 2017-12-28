@@ -1,4 +1,5 @@
-#Description
+# Description
+
 There are two parts to bitter.
 First of all, it is a wrapper over Python twitter that adds support for several Twitter API credentials (e.g. authorizing the same app with different user accounts).
 Secondly, it is a command line tool to automate several actions (e.g. downloading user networks) using the wrapper.

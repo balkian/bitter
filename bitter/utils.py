@@ -155,17 +155,24 @@ def get_hashtags(iter_tweets, best=None):
 
 
 def read_file(filename, tail=False):
-    with open(filename) as f:
-        while True:
-            line = f.readline()
-            if line not in (None, '', '\n'):
-                tweet = json.loads(line.strip())
-                yield tweet
-            else:
-                if tail:
-                    time.sleep(1)
-                else:
-                    return
+    if filename == '-':
+        f = sys.stdin
+    else:
+        f = open(filename)
+    try:
+      while True:
+          line = f.readline()
+          if line not in (None, '', '\n'):
+              tweet = json.loads(line.strip())
+              yield tweet
+          else:
+              if tail:
+                  time.sleep(1)
+              else:
+                  return
+    finally:
+        if f != sys.stdin:
+          close(f)
 
 
 def get_users(wq, ulist, by_name=False, queue=None, max_users=100):

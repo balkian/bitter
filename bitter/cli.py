@@ -393,7 +393,7 @@ def stream(ctx):
 @stream.command('get')
 @click.option('-l', '--locations', default=None)
 @click.option('-t', '--track', default=None)
-@click.option('-f', '--file', help='File to store the stream of tweets')
+@click.option('-f', '--file', default=None, help='File to store the stream of tweets')
 @click.option('-p', '--politelyretry', help='Politely retry after a hangup/connection error', is_flag=True, default=True)
 @click.pass_context 
 def get_stream(ctx, locations, track, file, politelyretry):
@@ -416,10 +416,14 @@ def get_stream(ctx, locations, track, file, politelyretry):
                 iterator = wq.statuses.sample()
             else:
                 iterator = wq.statuses.filter(**query_args)#"-4.25,40.16,-3.40,40.75")
-            for i in iterator:
-                yield i
-            if not politelyretry:
-                return
+            try:
+              for i in iterator:
+                  yield i
+              if not politelyretry:
+                  return
+            except Exception:
+                if not politelyretry:
+                    raise ex
             thishangup = time.time()
             if thishangup - lasthangup < 60:
                 raise Exception('Too many hangups in a row.')
