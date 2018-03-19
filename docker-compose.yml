@@ -1,0 +1,12 @@
+version: '2'
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile-3.4
+    volumes:
+      - '.:/usr/src/app'
+    tty: yes
+    working_dir: '/usr/src/app'
+    entrypoint: '/bin/bash'
+    command: ''
