@@ -113,7 +113,7 @@ class RestWorker(TwitterWorker):
 
     def get_wait(self, uriparts):
         limits = self.get_limit(uriparts)
-        if limits['remaining'] > 0:
+        if limits.get('remaining', 1) > 0:
             return 0
         reset = limits.get('reset', 0)
         now = time.time()

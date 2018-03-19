@@ -14,6 +14,7 @@ except AttributeError:
     test_reqs = parse_requirements("test-requirements.txt")
 
 import sys
+import os
 import itertools
 if sys.version_info <= (3, 0):
     install_reqs = itertools.chain(install_reqs, py2_reqs)
@@ -23,7 +24,8 @@ if sys.version_info <= (3, 0):
 install_reqs = [str(ir.req) for ir in install_reqs]
 test_reqs = [str(ir.req) for ir in test_reqs]
 
-from bitter import __version__
+with open(os.path.join('bitter', 'VERSION'), 'r') as f:
+    __version__ = f.read().strip()
 
 setup(
     name="bitter",

@@ -3,11 +3,13 @@ import json
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.types import BigInteger, Integer, Text, Boolean
+from sqlalchemy.schema import ForeignKey
 from sqlalchemy.pool import SingletonThreadPool
 from sqlalchemy import Column, Index
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from functools import wraps
 
 Base = declarative_base()
 
@@ -90,6 +92,34 @@ class ExtractorEntry(Base):
     busy = Column(Boolean, default=False)
 
 
+class Search(Base):
+    __tablename__ = 'search_queries'
+
+    id = Column(Integer, primary_key=True, index=True, unique=True)
+    endpoint = Column(Text, comment="Endpoint URL")
+    attrs = Column(Text, comment="Text version of the dictionary of parameters")
+    count = Column(Integer)
+    current_count = Column(Integer)
+    current_id = Column(BigInteger, comment='Oldest ID retrieved (should match max_id when done)')
+    since_id = Column(BigInteger)
+
+class SearchResults(Base):
+    __tablename__ = 'search_results'
+    id = Column(Integer, primary_key=True, index=True, unique=True)
+    search_id = Column(ForeignKey('search_queries.id'))
+    resource_id = Column(Text)
+
+def memoize(f):
+    memo = {}
+    @wraps(f)
+    def helper(self, **kwargs):
+        st = dict_to_str(kwargs)
+        key = (self.__uriparts, st)
+        if key not in memo:
+            memo[key] = f(self, **kwargs)
+        return memo[key]
+    return helper
+
 def make_session(url):
     if not isinstance(url, str):
         print(url)
@@ -100,24 +130,6 @@ def make_session(url):
     session = Session()
     return session
 
-def test(db='sqlite:///users.db'):
 
-    from sqlalchemy import exists
-    session = make_session(db)
-
-    our_user = session.query(User).first() 
-
-    print(our_user.name)
-    print(session.query(User).count())
-    fake_user = User(name="Fake user")
-    session.add(fake_user)
-    session.commit()
-    print(session.query(User).count())
-    print(session.query(exists().where(User.name == "Fake user")).scalar())
-    fake_committed = session.query(User).filter_by(name="Fake user").first()
-    print(fake_committed.id)
-    print(fake_committed.name)
-    session.delete(fake_committed)
-    session.commit()
-    print(session.query(User).count())
-    print(list(session.execute('SELECT 1 from users where id=\'%s\'' % 1548)))
+def dict_to_str(args):
+    return json.dumps(args, sort_keys=True)

@@ -333,6 +333,7 @@ def reset_extractor(ctx):
 @click.pass_context
 def get_limits(ctx, url):
     wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
+    total = {}
     for worker in wq.queue:
         resp = worker.client.application.rate_limit_status()
         print('#'*20)
@@ -345,9 +346,15 @@ def get_limits(ctx, url):
                 limit = resp['resources'][cat].get(url, None) or resp['resources'][cat]
             else:
                 print('Cat {} not found'.format(cat))
-            print('{}: {}'.format(url, limit))           
+                continue
+            for k in limit:
+                total[k] = total.get(k, 0) + limit[k]
+            print('{}: {}'.format(url, limit))
         else:
             print(json.dumps(resp, indent=2))
+    if url:
+        print('Total for {}: {}'.format(url, total))
+
 
 
 @main.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=False))
@@ -358,9 +365,14 @@ def get_limits(ctx, url):
 @click.pass_context
 def api(ctx, cmd, tweets, users, api_args):
     opts = {}
+    mappings = {
+        'id': '_id'
+    }
     i = iter(api_args)
     for k, v in zip(i, i):
         k = k.replace('--', '')
+        if k in mappings:
+            k = mappings[k]
         opts[k] = v
     wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
     if tweets:
@@ -441,7 +453,7 @@ def get_stream(ctx, locations, track, file, politelyretry):
 def read_stream(ctx, file, tail):
     for tweet in utils.read_file(file, tail=tail):
         try:
-            print(u'{timestamp_ms}- @{screen_name}: {text}'.format(timestamp_ms=tweet['timestamp_ms'], screen_name=tweet['user']['screen_name'], text=tweet['text']))
+            print(u'{timestamp_ms}- @{screen_name}: {text}'.format(timestamp_ms=tweet['created_at'], screen_name=tweet['user']['screen_name'], text=tweet['text']))
         except (KeyError, TypeError):
             print('Raw tweet: {}'.format(tweet))
 

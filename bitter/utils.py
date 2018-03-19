@@ -91,7 +91,9 @@ def config(conffile=None):
 
 def read_config(conffile):
     p = conffile and get_config_path(conffile)
-    if p and os.path.exists(p):
+    if p:
+        if not os.path.exists(p):
+            raise Exception('{} file does not exist.'.format(p))
         f = open(p, 'r')
     elif 'BITTER_CONFIG' not in os.environ:
         raise Exception('No config file or BITTER_CONFIG env variable.')
@@ -121,7 +123,7 @@ def create_config_file(conffile=None):
     with open(conffile, 'a'):
         pass
 
-    
+
 def get_credentials(conffile=None, inverse=False, **kwargs):
     creds = []
     for i in iter_credentials(conffile):

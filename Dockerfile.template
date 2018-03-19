@@ -2,6 +2,6 @@
 From python:{{PYVERSION}}-onbuild
 Maintainer J. Fernando Sánchez @balkian
 
-RUN pip install -e "/usr/src/app/[server]"
+RUN pip install ".[server]"
 
 ENTRYPOINT ["bitter"]
