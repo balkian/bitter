@@ -32,9 +32,89 @@ bitter api statuses/user_timeline --id thepsf --count 500
 ```
 
 
+## Adding credentials
+
+```
+bitter --config <YOUR CONFIGURATION FILE> credentials add
+```
+
+You can specify the parameters in the command or let the command line guide you through the process.
+
 # Examples
 
-The CLI can query the rest API:
+## Downloading a list of tweets
+
+Bitter can download tweets from a list of tweets in a CSV file.
+The result is stored as individual json files in your folder of choice.
+You can even specify the column number for tweet ids.
+Bitter will not try to download 
+
+```
+Usage: bitter tweet get_all [OPTIONS] TWEETSFILE
+
+  Download tweets from a list of tweets in a CSV file. The result is stored
+  as individual json files in your folder of choice.
+
+Options:
+  -f, --folder TEXT
+  -d, --delimiter TEXT
+  -h, --header          Discard the first line (use it as a header)
+  -q, --quotechar TEXT
+  -c, --column INTEGER
+  --help                Show this message and exit.
+
+```
+
+For instance, this will download `tweet_ids.csv` in the `tweet_info` folder:
+
+```
+bitter tweet get_all -f tweet_info tweet_ids.csv
+```
+
+## Downloading a list of users
+
+Bitter downloads users and tweets in a similar way:
+
+```
+Usage: bitter users get_all [OPTIONS] USERSFILE
+
+  Download users from a list of user ids/screen names in a CSV file. The
+  result is stored as individual json files in your folder of choice.
+
+Options:
+  -f, --folder TEXT
+  -d, --delimiter TEXT
+  -h, --header          Discard the first line (use it as a header)
+  -q, --quotechar TEXT
+  -c, --column INTEGER
+  --help                Show this message and exit.
+```
+
+The only difference is that users can be downloaded via `screen_name` or `user_id`.
+This method does not try to resolve screen names to user ids, so users may be downloaded more than once if they appear in both ways.
+
+## Downloading a stream
+
+```
+Usage: bitter stream get [OPTIONS]
+
+Options:
+  -l, --locations TEXT
+  -t, --track TEXT
+  -f, --file TEXT       File to store the stream of tweets. Default: standard output
+  -p, --politelyretry   Politely retry after a hangup/connection error
+  --help                Show this message and exit.
+```
+
+```
+bitter --config .bitter.yaml stream get 
+```
+python -m bitter.cli --config .bitter.yaml api '/search/tweets' --result_type recent --q 'bitter OR #bitter OR @bitter' --tweet_mode extended --tweets --max_count 5000 >> mytweets.jsonlines
+
+
+## REST queries
+
+In newer versions of bitter, individual methods to download tweets/users using the REST API are being replaced with a generic method to call the API.
 
 ```
 bitter api <URL endpoint> --parameter VALUE ... | [--tweets | --users] [--max_count MAX_COUNT] [--count COUNT_PER_CALL]

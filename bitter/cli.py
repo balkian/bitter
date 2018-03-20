@@ -41,6 +41,32 @@ def main(ctx, verbose, logging_level, config, credentials):
     if os.path.exists(utils.get_config_path(credentials)):
       utils.copy_credentials_to_config(credentials, config)
 
+
+@main.group()
+@click.pass_context 
+def credentials(ctx):
+    pass
+
+@credentials.command('add')
+@click.option('--consumer_key', default=None)
+@click.option('--consumer_secret', default=None)
+@click.option('--token_key', default=None)
+@click.option('--token_secret', default=None)
+@click.argument('user_name')
+def add(user_name, consumer_key, consumer_secret, token_key, token_secret):
+    if not consumer_key:
+        consumer_key = click.prompt('Please, enter your YOUR CONSUMER KEY')
+    if not consumer_secret:
+        consumer_secret = click.prompt('Please, enter your CONSUMER SECRET')
+    if not token_key:
+        token_key = click.prompt('Please, enter your ACCESS TOKEN')
+    if not token_secret:
+        token_secret = click.prompt('Please, enter your ACCESS TOKEN SECRET')
+    utils.add_credentials(conffile=bconf.CONFIG_FILE, user=user_name, consumer_key=consumer_key, consumer_secret=consumer_secret,
+                          token_key=token_key, token_secret=token_secret)
+    click.echo('Credentials added for {}'.format(user_name))
+
+
 @main.group()
 @click.pass_context 
 def tweet(ctx):
@@ -52,22 +78,36 @@ def tweet(ctx):
 @click.option('-u', '--update', help="Update the file even if the tweet exists", is_flag=True, default=False)
 @click.argument('tweetid')
 def get_tweet(tweetid, write, folder, update):
-    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     utils.download_tweet(wq, tweetid, write, folder, update)
-        
-@tweet.command('get_all')
+
+@tweet.command('get_all', help='''Download tweets from a list of tweets in a CSV file.
+The result is stored as individual json files in your folder of choice.''')
 @click.argument('tweetsfile', 'File with a list of tweets to look up')
 @click.option('-f', '--folder', default="tweets")
+@click.option('-u', '--update', is_flag=True, default=False, help='Download user even if it is already present. WARNING: it will overwrite existing files!')
+@click.option('-d', '--delimiter', default=",")
+@click.option('-h', '--header', help='Discard the first line (use it as a header)',
+              is_flag=True, default=False)
+@click.option('-q', '--quotechar', default='"')
+@click.option('-c', '--column', type=int, default=0)
 @click.pass_context
-def get_tweets(ctx, tweetsfile, folder):
-    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
-    utils.download_tweets(wq, tweetsfile, folder)
+def get_tweets(ctx, tweetsfile, folder, update, delimiter, header, quotechar, column):
+    if update and not click.confirm('This may overwrite existing tweets. Continue?'):
+        click.echo('Cancelling')
+        return
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
+    for i in utils.download_file(wq, tweetsfile, folder, delimiter=delimiter,
+                                 batch_method=utils.tweet_download_batch,
+                                 header=header, quotechar=quotechar,
+                                 column=column, update=update):
+        pass
 
 @tweet.command('search')
 @click.argument('query')
 @click.pass_context 
 def search(ctx, query):
-    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     t = utils.search_tweet(wq, query)
     print(json.dumps(t, indent=2))
 
@@ -75,7 +115,7 @@ def search(ctx, query):
 @click.argument('user')
 @click.pass_context 
 def timeline(ctx, user):
-    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     t = utils.user_timeline(wq, user)
     print(json.dumps(t, indent=2))
 
@@ -101,7 +141,7 @@ def list_users(ctx, db):
 @click.option('-f', '--folder', default="users")
 @click.option('-u', '--update', help="Update the file even if the user exists", is_flag=True, default=False)
 def get_user(user, write, folder, update):
-    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     if not write:
         u = utils.get_user(wq, user)
         js = json.dumps(u, indent=2)
@@ -118,15 +158,28 @@ def get_user(user, write, folder, update):
         js = json.dumps(u, indent=2)
         print(js, file=f)
 
-@users.command('get_all')
+@users.command('get_all', help='''Download users from a list of user ids/screen names in a CSV file.
+               The result is stored as individual json files in your folder of choice.''')
 @click.argument('usersfile', 'File with a list of users to look up')
 @click.option('-f', '--folder', default="users")
+@click.option('-u', '--update', is_flag=True, default=False, help='Download user even if it is already present. WARNING: it will overwrite existing files!')
+@click.option('-d', '--delimiter', default=",")
+@click.option('-h', '--header', help='Discard the first line (use it as a header)',
+              is_flag=True, default=False)
+@click.option('-q', '--quotechar', default='"')
+@click.option('-c', '--column', type=int, default=0)
 @click.pass_context
-def get_users(ctx, usersfile, folder):
-    with open(usersfile) as f:
-        for line in f:
-            uid = line.strip()
-            ctx.invoke(get_user, folder=folder, user=uid, write=True)
+def get_users(ctx, usersfile, folder, update, delimiter, header, quotechar, column):
+    if update and not click.confirm('This may overwrite existing users. Continue?'):
+        click.echo('Cancelling')
+        return
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
+    for i in utils.download_file(wq, usersfile, folder, delimiter=delimiter,
+                                 batch_method=utils.user_download_batch,
+                                 update=update,
+                                 header=header, quotechar=quotechar,
+                                 column=column):
+        pass
 
 @users.command('crawl')
 @click.option('--db', required=True, help='Database to save all users.')
@@ -147,7 +200,7 @@ def crawl_users(ctx, usersfile, skip, until, threads, db):
             return ExitStack()
 
 
-    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     logger.info('Starting Network crawler with {} threads and {} credentials.'.format(threads,
                                                                                       len(wq.queue)))
 
@@ -311,7 +364,7 @@ def users_extractor(ctx):
 @click.pass_context
 def extract(ctx, recursive, user, name, initfile):
     print(locals())
-    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     dburi = ctx.obj['DBURI']
     utils.extract(wq,
                   recursive=recursive,
@@ -323,7 +376,7 @@ def extract(ctx, recursive, user, name, initfile):
 @extractor.command('reset')
 @click.pass_context
 def reset_extractor(ctx):
-    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     db = ctx.obj['DBURI']
     session = make_session(db)
     session.query(ExtractorEntry).filter(ExtractorEntry.pending==True).update({'pending':False})
@@ -332,7 +385,7 @@ def reset_extractor(ctx):
 @click.argument('url', required=False)
 @click.pass_context
 def get_limits(ctx, url):
-    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     total = {}
     for worker in wq.queue:
         resp = worker.client.application.rate_limit_status()
@@ -357,7 +410,8 @@ def get_limits(ctx, url):
 
 
 
-@main.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=False))
+@main.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=False),
+              help='''Issue a call to an endpoint of the Twitter API.''')
 @click.argument('cmd', nargs=1)
 @click.option('--tweets', is_flag=True, help='Fetch more tweets using smart pagination. Use --count to control how many tweets to fetch per call, and --max_count to set the number of desired tweets (or -1 to get as many as possible).', type=bool, default=False)
 @click.option('--users', is_flag=True, help='Fetch more users using smart pagination. Use --count to control how many users to fetch per call, and --max_count to set the number of desired users (or -1 to get as many as possible).', type=bool, default=False)
@@ -374,7 +428,7 @@ def api(ctx, cmd, tweets, users, api_args):
         if k in mappings:
             k = mappings[k]
         opts[k] = v
-    wq = crawlers.TwitterQueue.from_config(bconf.CONFIG_FILE)
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     if tweets:
         resp = utils.consume_tweets(wq[cmd], **opts)
     elif users:
@@ -409,7 +463,7 @@ def stream(ctx):
 @click.option('-p', '--politelyretry', help='Politely retry after a hangup/connection error', is_flag=True, default=True)
 @click.pass_context 
 def get_stream(ctx, locations, track, file, politelyretry):
-    wq = crawlers.StreamQueue.from_config(bconf.CONFIG_FILE, 1)
+    wq = crawlers.StreamQueue.from_config(conffile=bconf.CONFIG_FILE, max_workers=1)
 
     query_args = {}
     if locations:

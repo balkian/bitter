@@ -54,7 +54,7 @@ class TestUtils(TestCase):
         toc = time.time()
         assert (tic-toc) < 600
         resp2 = utils.parallel(echo, [1,2,3,4], chunksize=2)
-        assert list(resp2) == [1,2,3,4]
+        assert list(resp2) == [1,2, 3,4]
 
 
 class TestUtilsEnv(TestUtils):
@@ -68,5 +68,3 @@ class TestUtilsEnv(TestUtils):
     def tearDown(self):
         if hasattr(self, 'oldenv'):
             os.environ['BITTER_CONFIG'] = self.oldenv
-        
-

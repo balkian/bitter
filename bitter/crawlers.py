@@ -61,12 +61,14 @@ class FromCredentialsMixin(object):
 class FromConfigMixin(object):
 
     @classmethod
-    def from_config(cls, conffile=None, max_workers=None):
+    def from_config(cls, config=None, conffile=None, max_workers=None):
         wq = cls()
 
-        with utils.config(conffile) as c:
-          for cred in islice(c['credentials'], max_workers):
-              wq.ready(cls.worker_class(cred["user"], cred))
+        if not config:
+          with utils.config(conffile) as c:
+              config = c
+        for cred in islice(config['credentials'], max_workers):
+            wq.ready(cls.worker_class(cred["user"], cred))
         return wq
 
 class TwitterWorker(object):

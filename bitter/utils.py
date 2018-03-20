@@ -4,6 +4,7 @@ import logging
 import time
 import json
 import yaml
+import csv
 import io
 
 import signal
@@ -93,7 +94,7 @@ def read_config(conffile):
     p = conffile and get_config_path(conffile)
     if p:
         if not os.path.exists(p):
-            raise Exception('{} file does not exist.'.format(p))
+            raise IOError('{} file does not exist.'.format(p))
         f = open(p, 'r')
     elif 'BITTER_CONFIG' not in os.environ:
         raise Exception('No config file or BITTER_CONFIG env variable.')
@@ -103,6 +104,8 @@ def read_config(conffile):
 
 
 def write_config(conf, conffile=None):
+    if not conf:
+        conf = {'credentials': []}
     if conffile:
         p = get_config_path(conffile)
         with open(p, 'w') as f:
@@ -122,6 +125,7 @@ def create_config_file(conffile=None):
     conffile = get_config_path(conffile)
     with open(conffile, 'a'):
         pass
+    write_config(None, conffile)
 
 
 def get_credentials(conffile=None, inverse=False, **kwargs):
@@ -142,7 +146,11 @@ def delete_credentials(conffile=None, **creds):
 
 
 def add_credentials(conffile=None, **creds):
-    exist = get_credentials(conffile, **creds)
+    try:
+        exist = get_credentials(conffile, **creds)
+    except IOError:
+        exist = False
+        create_config_file(conffile)
     if exist:
         return
     with config(conffile) as c:
@@ -451,86 +459,128 @@ def get_user(c, user):
         return c.users.lookup(screen_name=user)[0]
 
 def download_tweet(wq, tweetid, write=True, folder="downloaded_tweets", update=False):
-    cached = cached_tweet(tweetid, folder)
+    cached = cached_id(tweetid, folder)
     tweet = None
     if update or not cached:
         tweet = get_tweet(wq, tweetid)
-        js = json.dumps(tweet, indent=2)
+        js = json.dumps(tweet)
     if write:
         if tweet:
-            write_tweet_json(js, folder)
+            write_json(js, folder)
     else:
         print(js)
 
 
-def cached_tweet(tweetid, folder):
+def cached_id(oid, folder):
     tweet = None
-    file = os.path.join(folder, '%s.json' % tweetid)
+    file = os.path.join(folder, '%s.json' % oid)
     if os.path.exists(file) and os.path.isfile(file):
         try:
-            # print('%s: Tweet exists' % tweetid)
+            # print('%s: Object exists' % oid)
             with open(file) as f:
                 tweet = json.load(f)
         except Exception as ex:
-            logger.error('Error getting cached version of {}: {}'.format(tweetid, ex))
+            logger.error('Error getting cached version of {}: {}'.format(oid, ex))
     return tweet
 
-def write_tweet_json(js, folder):
-    tweetid = js['id']
-    file = tweet_file(tweetid, folder)
+def write_json(js, folder, oid=None):
+    if not oid:
+      oid = js['id']
+    file = id_file(oid, folder)
     if not os.path.exists(folder):
         os.makedirs(folder)
     with open(file, 'w') as f:
-        json.dump(js, f, indent=2)
-        logger.info('Written {} to file {}'.format(tweetid, file))
+        json.dump(js, f)
+        logger.info('Written {} to file {}'.format(oid, file))
 
-def tweet_file(tweetid, folder):
-    return os.path.join(folder, '%s.json' % tweetid)
+def id_file(oid, folder):
+    return os.path.join(folder, '%s.json' % oid)
 
-def tweet_fail_file(tweetid, folder):
+def fail_file(oid, folder):
     failsfolder = os.path.join(folder, 'failed')
     if not os.path.exists(failsfolder):
         os.makedirs(failsfolder)
-    return os.path.join(failsfolder, '%s.failed' % tweetid)
+    return os.path.join(failsfolder, '%s.failed' % oid)
 
-def tweet_failed(tweetid, folder):
-    return os.path.isfile(tweet_fail_file(tweetid, folder))
+def id_failed(oid, folder):
+    return os.path.isfile(fail_file(oid, folder))
 
-def download_tweets(wq, tweetsfile, folder, update=False, retry_failed=False, ignore_fails=True):
-    def filter_line(line):
-        tweetid = int(line)
-        # print('Checking {}'.format(tweetid))
-        if (cached_tweet(tweetid, folder) and not update) or (tweet_failed(tweetid, folder) and not retry_failed):
+def tweet_download_batch(wq, batch):
+    tweets = wq.statuses.lookup(_id=",".join(batch), map=True)['id']
+    return tweets.items()
+
+def user_download_batch(wq, batch):
+    screen_names = []
+    user_ids = []
+    for elem in batch:
+        try:
+            user_ids.append(int(elem))
+        except ValueError:
+            screen_names.append(elem)
+    print('Downloading: {} - {}'.format(user_ids, screen_names))
+    users = wq.users.lookup(user_id=",".join(user_ids), screen_name=",".join(screen_names))
+    found_ids = []
+    found_names = []
+    for user in users:
+        uid = user['id']
+        if uid in user_ids:
+            found_ids.append(uid)
+            yield (uid, user)
+        uname = user['screen_name']
+        if uname in screen_names:
+            found_names.append(uname)
+            yield (uname, user)
+    for uid in set(user_ids) - set(found_ids):
+        yield (uid, None)
+    for name in set(screen_names) - set(found_names):
+        yield (name, None)
+
+
+def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fails=True,
+                  batch_method=tweet_download_batch):
+    def filter_lines(line):
+        # print('Checking {}'.format(line))
+        oid = line[0]
+        if (cached_id(oid, folder) and not update) or (id_failed(oid, folder) and not retry_failed):
             yield None
         else:
-            yield line
+            yield str(oid)
 
     def print_result(res):
-        tid, tweet = res
-        if tweet:
-            try:
-                write_tweet_json(tweet, folder=folder)
-                yield 1
-            except Exception as ex:
-                logger.error('%s: %s' % (tid, ex))
-                if not ignore_fails:
-                    raise
-        else:
-            logger.info('Tweet not recovered: {}'.format(tid))
-            with open(tweet_fail_file(tid, folder), 'w') as f:
-                print('Tweet not found', file=f)
-            yield -1
+        for oid, obj in res:
+          if obj:
+              try:
+                  write_json(obj, folder=folder, oid=oid)
+                  yield 1
+              except Exception as ex:
+                  logger.error('%s: %s' % (oid, ex))
+                  if not ignore_fails:
+                      raise
+          else:
+              logger.info('Object not recovered: {}'.format(oid))
+              with open(fail_file(oid, folder), 'w') as f:
+                  print('Object not found', file=f)
+              yield -1
 
-    def download_batch(batch):
-        tweets = wq.statuses.lookup(_id=",".join(batch), map=True)['id']
-        return tweets.items()
+    objects_to_crawl = filter(lambda x: x is not None, tqdm(parallel(filter_lines, lst), desc='Total objects'))
+    batch_method = partial(batch_method, wq)
+    tweets = parallel(batch_method, objects_to_crawl, 100)
+    for res in tqdm(parallel(print_result, tweets), desc='Queried'):
+        yield res
 
-    with open(tweetsfile) as f:
-        lines = map(lambda x: x.strip(), f)
-        lines_to_crawl = filter(lambda x: x is not None, tqdm(parallel(filter_line, lines), desc='Total lines'))
-        tweets = parallel(download_batch, lines_to_crawl, 100)
-        for res in tqdm(parallel(print_result, tweets), desc='Queried'):
-            pass
+
+def download_file(wq, csvfile, folder, column=0, delimiter=',',
+                  header=False, quotechar='"', batch_method=tweet_download_batch,
+                  **kwargs):
+    with open(csvfile) as f:
+        csvreader = csv.reader(f, delimiter=str(delimiter), quotechar=str(quotechar))
+        if header:
+            next(csvreader)
+        tweets = map(lambda row: row[0].strip(), csvreader)
+        for res in download_list(wq, tweets, folder, batch_method=batch_method,
+                                 **kwargs):
+            yield res
+
 
 def download_timeline(wq, user):
     return wq.statuses.user_timeline(id=user)
