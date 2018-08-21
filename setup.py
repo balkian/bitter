@@ -7,19 +7,14 @@ def parse_requirements(filename):
     return [line for line in lineiter if line and not line.startswith("#")]
 
 install_reqs = parse_requirements("requirements.txt")
+py2_reqs = parse_requirements("requirements-py2.txt")
 test_reqs = parse_requirements("test-requirements.txt")
-extra_reqs = parse_requirements("extra-requirements.txt")
 
 import sys
 import os
 import itertools
 if sys.version_info <= (3, 0):
-    install_reqs = itertools.chain(install_reqs, py2_reqs)
-
-# reqs is a list of requirement
-# e.g. ['django==1.5.1', 'mezzanine==1.4.6']
-install_reqs = [str(ir.req) for ir in install_reqs]
-test_reqs = [str(ir.req) for ir in test_reqs]
+    install_reqs = install_reqs + py2_reqs
 
 with open(os.path.join('bitter', 'VERSION'), 'r') as f:
     __version__ = f.read().strip()
