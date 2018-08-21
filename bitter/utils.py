@@ -516,7 +516,7 @@ def user_download_batch(wq, batch):
         try:
             user_ids.append(int(elem))
         except ValueError:
-            screen_names.append(elem)
+            screen_names.append(elem.lower())
     print('Downloading: {} - {}'.format(user_ids, screen_names))
     users = wq.users.lookup(user_id=",".join(user_ids), screen_name=",".join(screen_names))
     found_ids = []
@@ -526,7 +526,7 @@ def user_download_batch(wq, batch):
         if uid in user_ids:
             found_ids.append(uid)
             yield (uid, user)
-        uname = user['screen_name']
+        uname = user['screen_name'].lower()
         if uname in screen_names:
             found_names.append(uname)
             yield (uname, user)
