@@ -514,7 +514,8 @@ def user_download_batch(wq, batch):
     user_ids = []
     for elem in batch:
         try:
-            user_ids.append(int(elem))
+            int(elem)
+            user_ids.append(str(elem))
         except ValueError:
             screen_names.append(elem.lower())
     print('Downloading: {} - {}'.format(user_ids, screen_names))
