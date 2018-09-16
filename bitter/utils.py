@@ -518,12 +518,22 @@ def user_download_batch(wq, batch):
             user_ids.append(str(elem))
         except ValueError:
             screen_names.append(elem.lower())
-    print('Downloading: {} - {}'.format(user_ids, screen_names))
-    users = wq.users.lookup(user_id=",".join(user_ids), screen_name=",".join(screen_names))
+    args = {}
+    if user_ids:
+        args['user_id'] = ','.join(user_ids)
+    if screen_names:
+        args['screen_name'] = ','.join(screen_names)
+    try:
+        users = wq.users.lookup(**args)
+    except TwitterHTTPError as ex:
+        if ex.e.code in (404,):
+            users = []
+        else:
+            raise
     found_ids = []
     found_names = []
     for user in users:
-        uid = user['id']
+        uid = user['id_str']
         if uid in user_ids:
             found_ids.append(uid)
             yield (uid, user)
@@ -552,6 +562,9 @@ def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fail
           if obj:
               try:
                   write_json(obj, folder=folder, oid=oid)
+                  failed = fail_file(oid, folder)
+                  if os.path.exists(failed):
+                      os.remove(failed)
                   yield 1
               except Exception as ex:
                   logger.error('%s: %s' % (oid, ex))
@@ -565,8 +578,13 @@ def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fail
 
     objects_to_crawl = filter(lambda x: x is not None, tqdm(parallel(filter_lines, lst), desc='Total objects'))
     batch_method = partial(batch_method, wq)
-    tweets = parallel(batch_method, objects_to_crawl, 100)
-    for res in tqdm(parallel(print_result, tweets), desc='Queried'):
+    objects = parallel(batch_method, objects_to_crawl, 100)
+    failed = 0
+    pbar = tqdm(parallel(print_result, objects), desc='Queried')
+    for res in pbar:
+        if res < 0:
+            failed += 1
+            pbar.set_description('Failed: %s. Queried' % failed, refresh=True)
         yield res
 
 

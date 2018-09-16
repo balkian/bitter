@@ -85,14 +85,15 @@ def get_tweet(tweetid, write, folder, update):
 The result is stored as individual json files in your folder of choice.''')
 @click.argument('tweetsfile', 'File with a list of tweets to look up')
 @click.option('-f', '--folder', default="tweets")
-@click.option('-u', '--update', is_flag=True, default=False, help='Download user even if it is already present. WARNING: it will overwrite existing files!')
+@click.option('-u', '--update', is_flag=True, default=False, help='Download tweet even if it is already present. WARNING: it will overwrite existing files!')
+@click.option('-r', '--retry', is_flag=True, default=False, help='Retry failed downloads')
 @click.option('-d', '--delimiter', default=",")
 @click.option('-h', '--header', help='Discard the first line (use it as a header)',
               is_flag=True, default=False)
 @click.option('-q', '--quotechar', default='"')
 @click.option('-c', '--column', type=int, default=0)
 @click.pass_context
-def get_tweets(ctx, tweetsfile, folder, update, delimiter, header, quotechar, column):
+def get_tweets(ctx, tweetsfile, folder, update, retry, delimiter, header, quotechar, column):
     if update and not click.confirm('This may overwrite existing tweets. Continue?'):
         click.echo('Cancelling')
         return
@@ -100,7 +101,7 @@ def get_tweets(ctx, tweetsfile, folder, update, delimiter, header, quotechar, co
     for i in utils.download_file(wq, tweetsfile, folder, delimiter=delimiter,
                                  batch_method=utils.tweet_download_batch,
                                  header=header, quotechar=quotechar,
-                                 column=column, update=update):
+                                 column=column, update=update, retry_failed=retry):
         pass
 
 @tweet.command('search')
@@ -163,20 +164,21 @@ def get_user(user, write, folder, update):
 @click.argument('usersfile', 'File with a list of users to look up')
 @click.option('-f', '--folder', default="users")
 @click.option('-u', '--update', is_flag=True, default=False, help='Download user even if it is already present. WARNING: it will overwrite existing files!')
+@click.option('-r', '--retry', is_flag=True, default=False, help='Retry failed downloads')
 @click.option('-d', '--delimiter', default=",")
 @click.option('-h', '--header', help='Discard the first line (use it as a header)',
               is_flag=True, default=False)
 @click.option('-q', '--quotechar', default='"')
 @click.option('-c', '--column', type=int, default=0)
 @click.pass_context
-def get_users(ctx, usersfile, folder, update, delimiter, header, quotechar, column):
+def get_users(ctx, usersfile, folder, update, retry, delimiter, header, quotechar, column):
     if update and not click.confirm('This may overwrite existing users. Continue?'):
         click.echo('Cancelling')
         return
     wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     for i in utils.download_file(wq, usersfile, folder, delimiter=delimiter,
                                  batch_method=utils.user_download_batch,
-                                 update=update,
+                                 update=update, retry_failed=retry,
                                  header=header, quotechar=quotechar,
                                  column=column):
         pass
