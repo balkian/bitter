@@ -13,6 +13,11 @@ import sqlalchemy
 import os
 import multiprocessing
 from multiprocessing.pool import ThreadPool
+from multiprocessing import Queue
+
+import queue
+import threading
+from select import select
 
 from functools import partial
 
@@ -22,6 +27,7 @@ from itertools import islice, chain
 from contextlib import contextmanager
 
 from collections import Counter
+from random import choice
 
 from builtins import map, filter
 
@@ -53,7 +59,7 @@ def chunk(iterable, n):
 def parallel(func, source, chunksize=1, numcpus=multiprocessing.cpu_count()):
     source = chunk(source, chunksize)
     p = ThreadPool(numcpus*2)
-    results = p.imap_unordered(func, source, chunksize=int(1000/numcpus))
+    results = p.imap_unordered(func, source)
     for i in chain.from_iterable(results):
         yield i
 
@@ -507,7 +513,8 @@ def id_failed(oid, folder):
 
 def tweet_download_batch(wq, batch):
     tweets = wq.statuses.lookup(_id=",".join(batch), map=True)['id']
-    return tweets.items()
+    for tid, tweet in tweets.items():
+        yield tid, tweet
 
 def user_download_batch(wq, batch):
     screen_names = []
@@ -547,45 +554,81 @@ def user_download_batch(wq, batch):
         yield (name, None)
 
 
-def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fails=True,
+def dump_result(oid, obj, folder, ignore_fails=True):
+    if obj:
+        try:
+            write_json(obj, folder=folder, oid=oid)
+            failed = fail_file(oid, folder)
+            if os.path.exists(failed):
+                os.remove(failed)
+        except Exception as ex:
+            logger.error('%s: %s' % (oid, ex))
+            if not ignore_fails:
+                raise
+    else:
+        logger.info('Object not recovered: {}'.format(oid))
+        with open(fail_file(oid, folder), 'w') as f:
+            print('Object not found', file=f)
+
+def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fails=False,
                   batch_method=tweet_download_batch):
-    def filter_lines(line):
-        # print('Checking {}'.format(line))
-        oid = line[0]
-        if (cached_id(oid, folder) and not update) or (id_failed(oid, folder) and not retry_failed):
-            yield None
-        else:
-            yield str(oid)
 
-    def print_result(res):
-        for oid, obj in res:
-          if obj:
-              try:
-                  write_json(obj, folder=folder, oid=oid)
-                  failed = fail_file(oid, folder)
-                  if os.path.exists(failed):
-                      os.remove(failed)
-                  yield 1
-              except Exception as ex:
-                  logger.error('%s: %s' % (oid, ex))
-                  if not ignore_fails:
-                      raise
-          else:
-              logger.info('Object not recovered: {}'.format(oid))
-              with open(fail_file(oid, folder), 'w') as f:
-                  print('Object not found', file=f)
-              yield -1
+    done = Queue()
 
-    objects_to_crawl = filter(lambda x: x is not None, tqdm(parallel(filter_lines, lst), desc='Total objects'))
-    batch_method = partial(batch_method, wq)
-    objects = parallel(batch_method, objects_to_crawl, 100)
-    failed = 0
-    pbar = tqdm(parallel(print_result, objects), desc='Queried')
-    for res in pbar:
-        if res < 0:
-            failed += 1
-            pbar.set_description('Failed: %s. Queried' % failed, refresh=True)
-        yield res
+    down = Queue()
+
+
+    def filter_list(lst, done, down):
+        print('filtering')
+        for oid in lst:
+            # print('Checking {}'.format(line))
+            cached = cached_id(oid, folder)
+            if (cached and not update):
+                done.put((oid, cached))
+            elif (id_failed(oid, folder) and not retry_failed):
+                done.put((oid, None))
+            else:
+                down.put(oid)
+        down.put(None)
+
+    def download_results(batch_method, down, done):
+        def gen():
+            while True:
+                r = down.get()
+                if not r:
+                    return
+                yield r
+
+        for t in parallel(batch_method, gen(), 100):
+            done.put(t)
+
+    def batch(*args, **kwargs):
+        return batch_method(wq, *args, **kwargs)
+
+    tc = threading.Thread(target=filter_list, args=(lst, done, down), daemon=True)
+    tc.start()
+    td = threading.Thread(target=download_results, args=(batch, down, done), daemon=True)
+    td.start()
+
+    def check_threads(ts, done):
+        for t in ts:
+            t.join()
+        done.put(None)
+
+    wait = threading.Thread(target=check_threads, args=([tc, td], done), daemon=True)
+    wait.start()
+
+    while True:
+        rec = done.get()
+
+        if rec is None:
+            break
+
+        oid, obj = rec
+        dump_result(oid, obj, folder, ignore_fails)
+        yield rec
+
+    wait.join()
 
 
 def download_file(wq, csvfile, folder, column=0, delimiter=',',
@@ -595,8 +638,14 @@ def download_file(wq, csvfile, folder, column=0, delimiter=',',
         csvreader = csv.reader(f, delimiter=str(delimiter), quotechar=str(quotechar))
         if header:
             next(csvreader)
-        tweets = map(lambda row: row[0].strip(), csvreader)
-        for res in download_list(wq, tweets, folder, batch_method=batch_method,
+
+        def reader(r):
+            for row in csvreader:
+                if len(row) > column:
+                    yield row[column].strip()
+
+
+        for res in download_list(wq, reader(csvreader), folder, batch_method=batch_method,
                                  **kwargs):
             yield res
 

@@ -21,7 +21,7 @@ if sys.version_info <= (3, 0):
     from contextlib2 import ExitStack
 else:
     from contextlib import ExitStack
-    
+
 
 
 logger = logging.getLogger(__name__)
@@ -42,10 +42,58 @@ def main(ctx, verbose, logging_level, config, credentials):
       utils.copy_credentials_to_config(credentials, config)
 
 
-@main.group()
-@click.pass_context 
+@main.group(invoke_without_command=True)
+@click.pass_context
 def credentials(ctx):
-    pass
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
+    for worker in wq.queue:
+        print('#'*20)
+        try:
+            resp = worker.client.application.rate_limit_status()
+            print(worker.name)
+        except Exception as ex:
+            print('{}: AUTHENTICATION ERROR: {}'.format(worker.name, ex) )
+
+
+@credentials.command('limits')
+@click.option('--all', type=bool, default=False, required=False,
+              help=('Print all limits. By default, it only limits that '
+                    'have been consumed will be shown.'))
+@click.argument('url', required=False)
+@click.pass_context
+def get_limits(ctx, all, url):
+    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
+    total = {}
+    for worker in wq.queue:
+        resp = worker.client.application.rate_limit_status()
+        print('#'*20)
+        print(worker.name)
+        if url:
+            limit = 'NOT FOUND'
+            print('URL is: {}'.format(url))
+            cat = url.split('/')[1]
+            if cat in resp['resources']:
+                limit = resp['resources'][cat].get(url, None) or resp['resources'][cat]
+            else:
+                print('Cat {} not found'.format(cat))
+                continue
+            for k in limit:
+                total[k] = total.get(k, 0) + limit[k]
+            print('{}: {}'.format(url, limit))
+            continue
+        nres = {}
+        if not all:
+            for res, urls in resp['resources'].items():
+                nurls = {}
+                for u, limits in urls.items():
+                    if limits['limit'] != limits['remaining']:
+                        nurls[u] = limits
+                if nurls:
+                    nres[res] = nurls
+            resp = nres
+        print(json.dumps(resp, indent=2))
+    if url:
+        print('Total for {}: {}'.format(url, total))
 
 @credentials.command('add')
 @click.option('--consumer_key', default=None)
@@ -68,7 +116,7 @@ def add(user_name, consumer_key, consumer_secret, token_key, token_secret):
 
 
 @main.group()
-@click.pass_context 
+@click.pass_context
 def tweet(ctx):
     pass
 
@@ -98,15 +146,21 @@ def get_tweets(ctx, tweetsfile, folder, update, retry, delimiter, header, quotec
         click.echo('Cancelling')
         return
     wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
-    for i in utils.download_file(wq, tweetsfile, folder, delimiter=delimiter,
-                                 batch_method=utils.tweet_download_batch,
-                                 header=header, quotechar=quotechar,
-                                 column=column, update=update, retry_failed=retry):
-        pass
+
+    status = tqdm('Queried')
+    failed = 0
+    for tid, obj in utils.download_file(wq, tweetsfile, folder, delimiter=delimiter,
+                                        batch_method=utils.tweet_download_batch,
+                                        header=header, quotechar=quotechar,
+                                        column=column, update=update, retry_failed=retry):
+        status.update(1)
+        if not obj:
+            failed += 1
+            status.set_description('Failed: %s. Queried' % failed, refresh=True)
 
 @tweet.command('search')
 @click.argument('query')
-@click.pass_context 
+@click.pass_context
 def search(ctx, query):
     wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     t = utils.search_tweet(wq, query)
@@ -114,7 +168,7 @@ def search(ctx, query):
 
 @tweet.command('timeline')
 @click.argument('user')
-@click.pass_context 
+@click.pass_context
 def timeline(ctx, user):
     wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     t = utils.user_timeline(wq, user)
@@ -293,7 +347,7 @@ def crawl_users(ctx, usersfile, skip, until, threads, db):
             speed = (collected-lastcollected)/10
             with statslock:
                 lastcollected = collected
-            
+
     logger.info('Done!')
 
 @main.group('extractor')
@@ -344,7 +398,7 @@ def network_extractor(ctx, as_json):
     if as_json:
         import json
         print(json.dumps(follower_map, indent=4))
-    
+
 
 @extractor.command('users')
 @click.pass_context
@@ -382,34 +436,6 @@ def reset_extractor(ctx):
     db = ctx.obj['DBURI']
     session = make_session(db)
     session.query(ExtractorEntry).filter(ExtractorEntry.pending==True).update({'pending':False})
-
-@main.command('limits')
-@click.argument('url', required=False)
-@click.pass_context
-def get_limits(ctx, url):
-    wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
-    total = {}
-    for worker in wq.queue:
-        resp = worker.client.application.rate_limit_status()
-        print('#'*20)
-        print(worker.name)
-        if url:
-            limit = 'NOT FOUND'
-            print('URL is: {}'.format(url))
-            cat = url.split('/')[1]
-            if cat in resp['resources']:
-                limit = resp['resources'][cat].get(url, None) or resp['resources'][cat]
-            else:
-                print('Cat {} not found'.format(cat))
-                continue
-            for k in limit:
-                total[k] = total.get(k, 0) + limit[k]
-            print('{}: {}'.format(url, limit))
-        else:
-            print(json.dumps(resp, indent=2))
-    if url:
-        print('Total for {}: {}'.format(url, total))
-
 
 
 @main.command(context_settings=dict(ignore_unknown_options=True, allow_extra_args=False),
@@ -454,7 +480,7 @@ def run_server(ctx, consumer_key, consumer_secret):
     app.run(host='0.0.0.0')
 
 @main.group()
-@click.pass_context 
+@click.pass_context
 def stream(ctx):
     pass
 
@@ -463,7 +489,7 @@ def stream(ctx):
 @click.option('-t', '--track', default=None)
 @click.option('-f', '--file', default=None, help='File to store the stream of tweets')
 @click.option('-p', '--politelyretry', help='Politely retry after a hangup/connection error', is_flag=True, default=True)
-@click.pass_context 
+@click.pass_context
 def get_stream(ctx, locations, track, file, politelyretry):
     wq = crawlers.StreamQueue.from_config(conffile=bconf.CONFIG_FILE, max_workers=1)
 
@@ -505,7 +531,7 @@ def get_stream(ctx, locations, track, file, politelyretry):
 @stream.command('read')
 @click.option('-f', '--file', help='File to read the stream of tweets from', required=True)
 @click.option('-t', '--tail', is_flag=True, help='Keep reading from the file, like tail', type=bool, default=False)
-@click.pass_context 
+@click.pass_context
 def read_stream(ctx, file, tail):
     for tweet in utils.read_file(file, tail=tail):
         try:
@@ -516,12 +542,12 @@ def read_stream(ctx, file, tail):
 @stream.command('tags')
 @click.option('-f', '--file', help='File to read the stream of tweets from', required=True)
 @click.argument('limit', required=False, default=None, type=int)
-@click.pass_context 
+@click.pass_context
 def tags_stream(ctx, file, limit):
     c = utils.get_hashtags(utils.read_file(file))
     for count, tag in c.most_common(limit):
         print(u'{} - {}'.format(count, tag))
-    
+
 
 if __name__ == '__main__':
     main()
