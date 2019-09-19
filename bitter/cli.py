@@ -131,7 +131,7 @@ def get_tweet(tweetid, write, folder, update):
 
 @tweet.command('get_all', help='''Download tweets from a list of tweets in a CSV file.
 The result is stored as individual json files in your folder of choice.''')
-@click.argument('tweetsfile', 'File with a list of tweets to look up')
+@click.argument('tweetsfile')
 @click.option('-f', '--folder', default="tweets")
 @click.option('-u', '--update', is_flag=True, default=False, help='Download tweet even if it is already present. WARNING: it will overwrite existing files!')
 @click.option('-r', '--retry', is_flag=True, default=False, help='Retry failed downloads')
@@ -215,7 +215,7 @@ def get_user(user, write, folder, update):
 
 @users.command('get_all', help='''Download users from a list of user ids/screen names in a CSV file.
                The result is stored as individual json files in your folder of choice.''')
-@click.argument('usersfile', 'File with a list of users to look up')
+@click.argument('usersfile')
 @click.option('-f', '--folder', default="users")
 @click.option('-u', '--update', is_flag=True, default=False, help='Download user even if it is already present. WARNING: it will overwrite existing files!')
 @click.option('-r', '--retry', is_flag=True, default=False, help='Retry failed downloads')
@@ -242,7 +242,7 @@ def get_users(ctx, usersfile, folder, update, retry, delimiter, header, quotecha
 @click.option('--skip', required=False, default=0, help='Skip N lines from the file.')
 @click.option('--until', required=False, type=str, default=0, help='Skip all lines until ID.')
 @click.option('--threads', required=False, type=str, default=20, help='Number of crawling threads.')
-@click.argument('usersfile', 'File with a list of users to look up')
+@click.argument('usersfile')
 @click.pass_context
 def crawl_users(ctx, usersfile, skip, until, threads, db):
     global dburl, ids_queue, skipped, enqueued, collected, lastid, db_lock
