@@ -1,4 +1,4 @@
-PYVERSIONS=3.4 2.7
+PYVERSIONS=3.5
 PYMAIN=$(firstword $(PYVERSIONS))
 NAME=bitter
 REPO=balkian

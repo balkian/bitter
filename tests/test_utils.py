@@ -48,13 +48,13 @@ class TestUtils(TestCase):
             time.sleep(0.5)
             return i
         tic = time.time()
-        resp = utils.parallel(echo, [1,2,3])
+        resp = utils.parallel(echo, [1, 2, 3])
         assert isinstance(resp, types.GeneratorType)
-        assert list(resp) == [1,2,3]
+        assert sorted(list(resp)) == [1, 2, 3]
         toc = time.time()
         assert (tic-toc) < 600
         resp2 = utils.parallel(echo, [1,2,3,4], chunksize=2)
-        assert list(resp2) == [1,2, 3,4]
+        assert sorted(list(resp2)) == [1, 2, 3, 4]
 
 
 class TestUtilsEnv(TestUtils):
