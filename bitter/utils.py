@@ -595,7 +595,9 @@ def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fail
         def gen():
             while True:
                 r = down.get()
-                if not r:
+                if r is None:
+                    down.close()
+                    down.join_thread()
                     return
                 yield r
 
@@ -622,6 +624,8 @@ def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fail
         rec = done.get()
 
         if rec is None:
+            done.close()
+            done.join_thread()
             break
 
         oid, obj = rec
