@@ -59,7 +59,14 @@ def chunk(iterable, n):
 def parallel(func, source, chunksize=1, numcpus=multiprocessing.cpu_count()):
     source = chunk(source, chunksize)
     p = ThreadPool(numcpus*2)
-    results = p.imap_unordered(func, source)
+
+    def wrapped_func(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as ex:
+            print('Exception on parallel thread: {}'.format(ex), file=sys.stderr)
+
+    results = p.imap_unordered(wrapped_func, source)
     for i in chain.from_iterable(results):
         yield i
 
@@ -106,7 +113,7 @@ def read_config(conffile):
         raise Exception('No config file or BITTER_CONFIG env variable.')
     else:
         f = io.StringIO(unicode(os.environ.get('BITTER_CONFIG', "")).strip().replace('\\n', '\n'))
-    return yaml.load(f) or {'credentials': []}
+    return yaml.load(f, Loader=yaml.SafeLoader) or {'credentials': []}
 
 
 def write_config(conf, conffile=None):
@@ -419,8 +426,11 @@ def extract(wq, recursive=False, user=None, initfile=None, dburi=None, extractor
     pending = pending_entries(dburi)
     session.close()
 
-    for i in tqdm(parallel(de, pending), desc='Downloading users', total=total_users):
-        logger.info("Got %s" % i)
+    with tqdm(parallel(de, pending), desc='Downloading users', total=total_users) as tq:
+        for i in tq: 
+            tq.write('Got {}'.format(i))
+            logger.info("Got %s" % i)
+
 
 
 def pending_entries(dburi):
@@ -465,16 +475,14 @@ def get_user(c, user):
         return c.users.lookup(screen_name=user)[0]
 
 def download_tweet(wq, tweetid, write=True, folder="downloaded_tweets", update=False):
-    cached = cached_id(tweetid, folder)
-    tweet = None
-    if update or not cached:
+    tweet = cached_id(tweetid, folder)
+    if update or not tweet:
         tweet = get_tweet(wq, tweetid)
-        js = json.dumps(tweet)
     if write:
         if tweet:
+            js = json.dumps(tweet)
             write_json(js, folder)
-    else:
-        print(js)
+    yield tweet
 
 
 def cached_id(oid, folder):
@@ -581,7 +589,6 @@ def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fail
     def filter_list(lst, done, down):
         print('filtering')
         for oid in lst:
-            # print('Checking {}'.format(line))
             cached = cached_id(oid, folder)
             if (cached and not update):
                 done.put((oid, cached))
@@ -635,12 +642,15 @@ def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fail
     wait.join()
 
 
-def download_file(wq, csvfile, folder, column=0, delimiter=',',
-                  header=False, quotechar='"', batch_method=tweet_download_batch,
+def download_file(wq, csvfile, folder, column=0, delimiter=',', skip=0,
+                  quotechar='"', commentchar=None, batch_method=tweet_download_batch,
                   **kwargs):
     with open(csvfile) as f:
+        if commentchar:
+            f = (line for line in f if not line.startswith('#'))
+
         csvreader = csv.reader(f, delimiter=str(delimiter), quotechar=str(quotechar))
-        if header:
+        for n in range(skip):
             next(csvreader)
 
         def reader(r):
