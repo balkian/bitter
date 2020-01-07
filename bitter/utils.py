@@ -459,7 +459,7 @@ def get_tweet(c, tid):
     return c.statuses.show(id=tid)
 
 def search_tweet(c, query):
-    return c.search.tweets(q=query)
+     yield from c.search.tweets(q=query)['statuses']
 
 def user_timeline(c, query):
     try:

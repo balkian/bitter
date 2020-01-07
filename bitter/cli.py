@@ -36,7 +36,7 @@ def serialize(function):
 
     @click.option('--csv', help='Print each object as a csv row. Provide a list of comma-separated fields to print.', default='', type=str)
     @click.option('--header', help='Header that will be printed at the beginning of the file', default=None)
-    @click.option('--json', '--jsonlines', help='Print each object as JSON in a new line.', is_flag=True)
+    @click.option('--jsonlines', '--json', help='Print each object as JSON in a new line.', is_flag=True)
     @click.option('--indented', help='Print each object as an indented JSON object', is_flag=True)
     @click.option('--outfile', help='Output file. It defaults to STDOUT', default=sys.stdout)
     def decorated(csv, header, jsonlines, indented, outfile, **kwargs):
@@ -48,10 +48,11 @@ def serialize(function):
         def do(out):
 
             if csv:
-                writer = tsv.writer(out, quoting=tsv.QUOTE_ALL, delimiter='\t')
+                delimiter = '\t'
+                writer = tsv.writer(out, quoting=tsv.QUOTE_ALL, delimiter=delimiter)
                 if header is None:
                     # Print fields as header unless told otherwise
-                    print(csv, file=out)
+                    print(csv.replace(',', delimiter), file=out)
                 fields = list(token.strip().split('.') for token in csv.split(','))
                 for obj in it:
                     writer.writerow(list(reduce(operator.getitem, field, obj) for field in fields))
@@ -212,11 +213,11 @@ def get_tweets(ctx, tweetsfile, folder, update, retry, delimiter, skip, quotecha
 
 @tweet.command('search')
 @click.argument('query')
+@serialize
 @click.pass_context
 def search(ctx, query):
     wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
-    t = utils.search_tweet(wq, query)
-    print(json.dumps(t, indent=2))
+    yield from utils.search_tweet(wq, query)
 
 @tweet.command('timeline')
 @click.argument('user')
@@ -277,8 +278,8 @@ def get_user(user, write, folder, update):
 @click.option('-q', '--quotechar', default='"')
 @click.option('--commentchar', help='Lines starting with this character will be ignored', default=None)
 @click.option('-c', '--column', type=int, default=0)
-@click.pass_context
 @serialize
+@click.pass_context
 def get_users(ctx, usersfile, folder, update, retry, delimiter, skip, quotechar, commentchar, column):
     if update and not click.confirm('This may overwrite existing users. Continue?'):
         click.echo('Cancelling')
