@@ -277,8 +277,7 @@ def download_entry(wq, entry_id, dburi=None, recursive=False):
     download_user(wq, session, user, entry, recursive)
     session.close()
 
-
-def download_user(wq, session, user, entry=None, recursive=False, max_followers=50000):
+def crawl_user(wq, session, user, entry=None, recursive=False, max_followers=50000):
 
     total_followers = user.followers_count
 
@@ -478,11 +477,21 @@ def download_tweet(wq, tweetid, write=True, folder="downloaded_tweets", update=F
     tweet = cached_id(tweetid, folder)
     if update or not tweet:
         tweet = get_tweet(wq, tweetid)
-    if write:
+    if write and update:
         if tweet:
             js = json.dumps(tweet)
             write_json(js, folder)
     yield tweet
+
+
+def download_user(wq, userid, write=True, folder="downloaded_users", update=False):
+    user = cached_id(userid, folder)
+    if update or not user:
+        user = get_user(wq, userid)
+    if write and update:
+        if user:
+            write_json(user, folder, aliases=[user['screen_name'], ])
+    yield user
 
 
 def cached_id(oid, folder):
@@ -497,7 +506,7 @@ def cached_id(oid, folder):
             logger.error('Error getting cached version of {}: {}'.format(oid, ex))
     return tweet
 
-def write_json(js, folder, oid=None):
+def write_json(js, folder, oid=None, aliases=[]):
     if not oid:
       oid = js['id']
     file = id_file(oid, folder)
@@ -506,6 +515,8 @@ def write_json(js, folder, oid=None):
     with open(file, 'w') as f:
         json.dump(js, f)
         logger.info('Written {} to file {}'.format(oid, file))
+    for alias in aliases:
+        os.symlink('%s.json' % oid, id_file(alias, folder))
 
 def id_file(oid, folder):
     return os.path.join(folder, '%s.json' % oid)

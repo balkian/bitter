@@ -93,6 +93,8 @@ def main(ctx, verbose, logging_level, config, credentials):
 @main.group(invoke_without_command=True)
 @click.pass_context
 def credentials(ctx):
+    if ctx.invoked_subcommand is not None:
+        return
     wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
     for worker in wq.queue:
         print('#'*20)
@@ -104,44 +106,47 @@ def credentials(ctx):
 
 
 @credentials.command('limits')
-@click.option('--all', type=bool, default=False, required=False,
-              help=('Print all limits. By default, it only limits that '
+@click.option('--no_aggregate', is_flag=True, default=False,
+              help=('Print limits from all workers. By default, limits are '
+                    'aggregated (summed).'))
+@click.option('--no_diff', is_flag=True, default=False,
+              help=('Print all limits. By default, only limits that '
                     'have been consumed will be shown.'))
 @click.argument('url', required=False)
 @click.pass_context
-def get_limits(ctx, all, url):
+def get_limits(ctx, no_aggregate, no_diff, url):
     wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
-    total = {}
+    limits = {}
+    if url:
+        print('URL is: {}'.format(url))
     for worker in wq.queue:
         resp = worker.client.application.rate_limit_status()
-        print('#'*20)
-        print(worker.name)
-        if url:
-            limit = 'NOT FOUND'
-            print('URL is: {}'.format(url))
-            cat = url.split('/')[1]
-            if cat in resp['resources']:
-                limit = resp['resources'][cat].get(url, None) or resp['resources'][cat]
-            else:
-                print('Cat {} not found'.format(cat))
-                continue
-            for k in limit:
-                total[k] = total.get(k, 0) + limit[k]
-            print('{}: {}'.format(url, limit))
-            continue
-        nres = {}
-        if not all:
-            for res, urls in resp['resources'].items():
-                nurls = {}
-                for u, limits in urls.items():
-                    if limits['limit'] != limits['remaining']:
-                        nurls[u] = limits
-                if nurls:
-                    nres[res] = nurls
-            resp = nres
-        print(json.dumps(resp, indent=2))
-    if url:
-        print('Total for {}: {}'.format(url, total))
+        for urlimits in resp['resources'].values():
+            for url, value in urlimits.items():
+                if url not in limits:
+                    limits[url] = {}
+                glob = limits[url].get('global', {})
+                limits[url][worker.name] = value
+                for k in ['limit', 'remaining']:
+                    if k not in glob:
+                        glob[k] = 0
+                    glob[k] += value[k]
+                limits[url]['global'] = glob
+    for url, lims in limits.items():
+        worker_list = lims.keys() if no_aggregate else ['global', ] 
+
+        url_printed = False
+
+        for worker in worker_list:
+            vals = lims[worker]
+            consumed = vals['limit'] - vals['remaining'] 
+            if no_diff or consumed:
+                if not url_printed:
+                    print(url)
+                    url_printed = True
+                print('\t', worker, ':')
+                print('\t\t', vals)
+
 
 @credentials.command('add')
 @click.option('--consumer_key', default=None)
@@ -169,14 +174,14 @@ def tweet(ctx):
     pass
 
 @tweet.command('get')
-@click.option('-w', '--write', is_flag=True, default=False)
+@click.option('-d', '--dry_run', is_flag=True, default=False)
 @click.option('-f', '--folder', default="tweets")
 @click.option('-u', '--update', help="Update the file even if the tweet exists", is_flag=True, default=False)
 @click.argument('tweetid')
 @serialize
-def get_tweet(tweetid, write, folder, update):
+def get_tweet(tweetid, dry_run, folder, update):
     wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
-    yield from utils.download_tweet(wq, tweetid, write, folder, update)
+    yield from utils.download_tweet(wq, tweetid, not dry_run, folder, update)
 
 @tweet.command('get_all', help='''Download tweets from a list of tweets in a CSV file.
 The result is stored as individual json files in your folder of choice.''')
@@ -245,26 +250,13 @@ def list_users(ctx, db):
 
 @users.command('get')
 @click.argument('user')
-@click.option('-w', '--write', is_flag=True, default=False)
+@click.option('-d', '--dry_run', is_flag=True, default=False)
 @click.option('-f', '--folder', default="users")
 @click.option('-u', '--update', help="Update the file even if the user exists", is_flag=True, default=False)
-def get_user(user, write, folder, update):
+@serialize
+def get_user(user, dry_run, folder, update):
     wq = crawlers.TwitterQueue.from_config(conffile=bconf.CONFIG_FILE)
-    if not write:
-        u = utils.get_user(wq, user)
-        js = json.dumps(u, indent=2)
-        print(js)
-        return
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-    file = os.path.join(folder, '%s.json' % user)
-    if not update and os.path.exists(file) and os.path.isfile(file):
-        print('User exists: %s' % user)
-        return
-    with open(file, 'w') as f:
-        u = utils.get_user(wq, user)
-        js = json.dumps(u, indent=2)
-        print(js, file=f)
+    yield from utils.download_user(wq, user, not dry_run, folder, update)
 
 @users.command('get_all', help='''Download users from a list of user ids/screen names in a CSV file.
                The result is stored as individual json files in your folder of choice.''')
