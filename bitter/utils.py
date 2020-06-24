@@ -19,7 +19,9 @@ import queue
 import threading
 from select import select
 
-from functools import partial
+import operator
+
+from functools import partial, reduce
 
 from tqdm import tqdm
 
@@ -473,22 +475,22 @@ def get_user(c, user):
     except ValueError:
         return c.users.lookup(screen_name=user)[0]
 
-def download_tweet(wq, tweetid, write=True, folder="downloaded_tweets", update=False):
+def download_tweet(wq, tweetid, cache=True, folder="downloaded_tweets", update=False):
     tweet = cached_id(tweetid, folder)
     if update or not tweet:
         tweet = get_tweet(wq, tweetid)
-    if write and update:
+    if cache and update:
         if tweet:
             js = json.dumps(tweet)
             write_json(js, folder)
     yield tweet
 
 
-def download_user(wq, userid, write=True, folder="downloaded_users", update=False):
+def download_user(wq, userid, cache=True, folder="downloaded_users", update=False):
     user = cached_id(userid, folder)
     if update or not user:
         user = get_user(wq, userid)
-    if write and update:
+    if cache and update:
         if user:
             write_json(user, folder, aliases=[user['screen_name'], ])
     yield user
@@ -589,7 +591,8 @@ def dump_result(oid, obj, folder, ignore_fails=True):
         with open(fail_file(oid, folder), 'w') as f:
             print('Object not found', file=f)
 
-def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fails=False,
+
+def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fails=False, cache=True,
                   batch_method=tweet_download_batch):
 
     done = Queue()
@@ -647,13 +650,24 @@ def download_list(wq, lst, folder, update=False, retry_failed=False, ignore_fail
             break
 
         oid, obj = rec
-        dump_result(oid, obj, folder, ignore_fails)
+        if cache or (not obj):
+            dump_result(oid, obj, folder, ignore_fails)
         yield rec
 
     wait.join()
 
 
-def download_file(wq, csvfile, folder, column=0, delimiter=',', skip=0,
+def download_tweets_file(*args, **kwargs):
+    kwargs['batch_method'] = tweet_download_batch
+    yield from download_file(*args, **kwargs)
+
+
+def download_users_file(*args, **kwargs):
+    kwargs['batch_method'] = user_download_batch
+    yield from download_file(*args, **kwargs)
+
+
+def download_file(wq, csvfile, folder, column=0, delimiter=',', skip=0, cache=True,
                   quotechar='"', commentchar=None, batch_method=tweet_download_batch,
                   **kwargs):
     with open(csvfile) as f:
@@ -670,7 +684,7 @@ def download_file(wq, csvfile, folder, column=0, delimiter=',', skip=0,
                     yield row[column].strip()
 
 
-        for res in download_list(wq, reader(csvreader), folder, batch_method=batch_method,
+        for res in download_list(wq, reader(csvreader), folder, batch_method=batch_method, cache=cache,
                                  **kwargs):
             yield res
 
@@ -748,3 +762,42 @@ def _users_control(func, apiargs, remaining=0, **kwargs):
         if int(cursor) != -1:
             stop = False
     return resp['users'], stop
+
+
+def serialized(it, outfile, outformat='csv', fields=[], header=None, ignore_missing=False, delimiter='\t'):
+    outformat = outformat.lower()
+    def do(out):
+
+        if outformat == 'csv':
+            writer = csv.writer(out, quoting=csv.QUOTE_ALL, delimiter=delimiter)
+            if header != '':
+                h = header
+                if h is None:
+                    h = delimiter.join(fields)
+                print(h, file=out)
+            attrs = list(token.strip().split('.') for token in fields)
+            for obj in it:
+                values = []
+                for attr in attrs:
+                    try:
+                        values.append(reduce(operator.getitem, attr, obj))
+                    except KeyError:
+                        if not ignore_missing:
+                            print('Key not present: {}'.format(attr), file=sys.stderr)
+                        values.append(None)
+                writer.writerow(values)
+        elif outformat == 'jsonlines':
+            for obj in it:
+                print(json.dumps(obj, sort_keys=True), file=out)
+        elif outformat == 'indented':
+            for obj in it:
+                print(json.dumps(obj, indent=4, sort_keys=True), file=out)
+        else:
+            for obj in it:
+                print(obj, file=out)
+
+    if outfile is sys.stdout:
+        return do(sys.stdout)
+
+    with open(outfile, 'w') as out:
+        return do(out)
